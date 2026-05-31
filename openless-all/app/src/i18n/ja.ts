@@ -899,6 +899,7 @@ export const ja: typeof zhCN = {
       rightCommand: '右 Command',
       fn: 'Fn (地球キー)',
       rightAlt: '右 Alt',
+      mediaPlayPause: '⏯ メディア再生/一時停止',
       custom: 'カスタム組み合わせ…',
     },
     fallback: 'グローバルショートカット',

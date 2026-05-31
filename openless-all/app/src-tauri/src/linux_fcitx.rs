@@ -100,6 +100,7 @@ fn trigger_to_keysym(trigger: crate::types::HotkeyTrigger) -> u32 {
         crate::types::HotkeyTrigger::LeftOption => KEYSYM_ALT_L,
         crate::types::HotkeyTrigger::RightCommand => KEYSYM_SUPER_R,
         crate::types::HotkeyTrigger::Fn => KEYSYM_CONTROL_R,
+        crate::types::HotkeyTrigger::MediaPlayPause => unreachable!("Windows-only"),
         crate::types::HotkeyTrigger::Custom => unreachable!(),
     }
 }
@@ -112,13 +113,16 @@ fn trigger_name(trigger: crate::types::HotkeyTrigger) -> &'static str {
         crate::types::HotkeyTrigger::LeftOption => "Alt_L",
         crate::types::HotkeyTrigger::RightCommand => "Super_R",
         crate::types::HotkeyTrigger::Fn => "Control_R",
+        crate::types::HotkeyTrigger::MediaPlayPause => unreachable!("Windows-only"),
         crate::types::HotkeyTrigger::Custom => unreachable!(),
     }
 }
 
 /// 将 OpenLess 的主听写热键绑定同步到 fcitx5 插件。
 pub fn sync_binding_to_plugin(binding: &crate::types::HotkeyBinding) {
-    if binding.trigger == crate::types::HotkeyTrigger::Custom {
+    if binding.trigger == crate::types::HotkeyTrigger::Custom
+        || binding.trigger == crate::types::HotkeyTrigger::MediaPlayPause
+    {
         return;
     }
     let sym = trigger_to_keysym(binding.trigger);
@@ -185,6 +189,9 @@ pub fn sync_qa_binding(trigger: Option<crate::types::HotkeyTrigger>) {
         let _ = set_qa_hotkey_raw(0, 0);
         return;
     };
+    if trigger == crate::types::HotkeyTrigger::MediaPlayPause {
+        return;
+    }
     let sym = trigger_to_keysym(trigger);
     let name = trigger_name(trigger);
     match set_qa_hotkey_raw(sym, 0) {
@@ -199,6 +206,9 @@ pub fn sync_translation_binding(trigger: Option<crate::types::HotkeyTrigger>) {
         let _ = set_translation_hotkey_raw(0, 0);
         return;
     };
+    if trigger == crate::types::HotkeyTrigger::MediaPlayPause {
+        return;
+    }
     let sym = trigger_to_keysym(trigger);
     let name = trigger_name(trigger);
     match set_translation_hotkey_raw(sym, 0) {

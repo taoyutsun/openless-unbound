@@ -169,6 +169,8 @@ function legacyTriggerCode(trigger: HotkeyTrigger | null | undefined): string | 
       return 'MetaRight';
     case 'fn':
       return 'Fn';
+    case 'mediaPlayPause':
+      return 'MediaPlayPause';
     default:
       return null;
   }
@@ -259,6 +261,7 @@ function formatPrimary(primary: string): string {
     case 'leftcontrol': return isMac ? 'Left ⌃' : 'Left Ctrl';
     case 'rightcommand': return isMac ? 'Right ⌘' : (currentPlatform().isWindows ? 'Right Win' : 'Right Super');
     case 'fn': return 'Fn';
+    case 'mediaplaypause': return '⏯ Media';
     case 'shift': return isMac ? '⇧' : 'Shift';
   }
   return trimmed;

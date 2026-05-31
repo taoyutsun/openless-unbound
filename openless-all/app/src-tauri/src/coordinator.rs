@@ -1988,6 +1988,8 @@ fn window_key_matches_trigger(trigger: crate::types::HotkeyTrigger, key: &str, c
         HotkeyTrigger::LeftOption => (key == "Alt" || key == "AltGraph") && code == "AltLeft",
         HotkeyTrigger::RightCommand => key == "Meta" && code == "MetaRight",
         HotkeyTrigger::Fn => key == "Control" && code == "ControlRight",
+        // MediaPlayPause 走 WH_KEYBOARD_LL，不走 window hotkey fallback
+        HotkeyTrigger::MediaPlayPause => false,
         // Custom 走 global-hotkey crate，不走 window hotkey fallback
         HotkeyTrigger::Custom => false,
     }

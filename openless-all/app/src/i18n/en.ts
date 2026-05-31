@@ -897,6 +897,7 @@ export const en: typeof zhCN = {
       rightCommand: 'Right Command',
       fn: 'Fn (Globe key)',
       rightAlt: 'Right Alt',
+      mediaPlayPause: '⏯ Media Play/Pause',
       custom: 'Custom combination\u2026',
     },
     fallback: 'Global hotkey',

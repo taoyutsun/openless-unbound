@@ -897,6 +897,7 @@ export const zhTW: typeof zhCN = {
       rightCommand: '右 Command',
       fn: 'Fn (地球鍵)',
       rightAlt: '右 Alt',
+      mediaPlayPause: '⏯ 媒體播放/暫停',
       custom: '自訂組合…',
     },
     fallback: '全局快捷鍵',

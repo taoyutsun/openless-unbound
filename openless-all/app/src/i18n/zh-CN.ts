@@ -895,6 +895,7 @@ export const zhCN = {
       rightCommand: '右 Command',
       fn: 'Fn (地球键)',
       rightAlt: '右 Alt',
+      mediaPlayPause: '⏯ 媒体播放/暂停',
       custom: '自定义组合键…',
     },
     fallback: '全局快捷键',

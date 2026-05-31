@@ -899,6 +899,7 @@ export const ko: typeof zhCN = {
       rightCommand: '오른쪽 Command',
       fn: 'Fn (지구본 키)',
       rightAlt: '오른쪽 Alt',
+      mediaPlayPause: '⏯ 미디어 재생/일시정지',
       custom: '사용자 지정 조합…',
     },
     fallback: '전역 단축키',

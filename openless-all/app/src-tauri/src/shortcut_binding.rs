@@ -54,6 +54,7 @@ pub fn legacy_modifier_trigger(binding: &ShortcutBinding) -> Option<HotkeyTrigge
             Some(HotkeyTrigger::RightCommand)
         }
         "fn" | "function" => Some(HotkeyTrigger::Fn),
+        "mediaplaypause" | "mediaplay" | "playpause" => Some(HotkeyTrigger::MediaPlayPause),
         _ => None,
     }
 }
@@ -66,6 +67,7 @@ pub fn binding_from_legacy_trigger(trigger: HotkeyTrigger) -> ShortcutBinding {
         HotkeyTrigger::LeftControl => "LeftControl",
         HotkeyTrigger::RightCommand => "RightCommand",
         HotkeyTrigger::Fn => "Fn",
+        HotkeyTrigger::MediaPlayPause => "MediaPlayPause",
         HotkeyTrigger::Custom => "RightOption",
     };
     ShortcutBinding {

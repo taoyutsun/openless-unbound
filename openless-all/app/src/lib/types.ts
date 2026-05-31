@@ -60,6 +60,7 @@ export type HotkeyTrigger =
   | 'rightCommand'
   | 'fn'
   | 'rightAlt'
+  | 'mediaPlayPause'
   | 'custom';
 
 export type HotkeyMode = 'toggle' | 'hold' | 'doubleClick';
