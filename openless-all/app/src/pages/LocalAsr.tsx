@@ -24,15 +24,18 @@ import {
     cancelSherpaOnnxAsrDownload,
     cancelSherpaOnnxAsrPrepare,
     cancelLocalAsrDownload,
+    deleteFoundryLocalAsrModel,
     deleteSherpaOnnxAsrModel,
     deleteLocalAsrModel,
     downloadLocalAsrModel,
     downloadSherpaOnnxAsrModel,
     fetchLocalAsrRemoteInfo,
     fetchSherpaOnnxAsrRemoteInfo,
+    getFoundryLocalAsrModelDir,
     getFoundryLocalAsrCatalog,
     getFoundryLocalAsrStatus,
     getLocalAsrEngineStatus,
+    getLocalAsrModelDir,
     getLocalAsrSettings,
     getSherpaOnnxAsrCatalog,
     getSherpaOnnxAsrModelDir,
@@ -44,7 +47,11 @@ import {
     releaseFoundryLocalAsr,
     releaseLocalAsrEngine,
     releaseSherpaOnnxAsr,
+    revealFoundryLocalAsrModelDir,
+    revealLocalAsrModelDir,
+    revealLocalAsrModelsRoot,
     revealSherpaOnnxAsrModelDir,
+    setLocalAsrModelsBaseDir,
     setFoundryLocalAsrLanguageHint,
     setFoundryLocalAsrModel,
     setFoundryLocalRuntimeSource,
@@ -108,6 +115,7 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
     const { prefs, updatePrefs } = useHotkeySettings()
     const [settings, setSettings] = useState<LocalAsrSettings | null>(null)
     const [models, setModels] = useState<LocalAsrModelStatus[]>([])
+    const [modelDirs, setModelDirs] = useState<Record<string, string>>({})
     const [progress, setProgress] = useState<
         Record<string, LocalAsrDownloadProgress>
     >({})
@@ -116,6 +124,7 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
     )
     const [error, setError] = useState<string | null>(null)
     const [busyModelId, setBusyModelId] = useState<string | null>(null)
+    const [storageBusy, setStorageBusy] = useState(false)
     const [foundryStatus, setFoundryStatus] =
         useState<FoundryLocalAsrStatus | null>(null)
     const [foundryCatalog, setFoundryCatalog] = useState<
@@ -124,11 +133,12 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
     const [selectedFoundryAlias, setSelectedFoundryAlias] =
         useState<FoundryLocalAsrModelAlias>("whisper-small")
     const [foundryBusy, setFoundryBusy] = useState<
-        "enable" | "prepare" | "release" | null
+        "enable" | "prepare" | "release" | "delete" | "reveal" | null
     >(null)
     const [foundryProgress, setFoundryProgress] =
         useState<FoundryPrepareProgress | null>(null)
     const [foundryCancelRequested, setFoundryCancelRequested] = useState(false)
+    const [foundryModelDir, setFoundryModelDir] = useState("")
     const [sherpaStatus, setSherpaStatus] =
         useState<SherpaOnnxAsrStatus | null>(null)
     const [sherpaCatalog, setSherpaCatalog] = useState<
@@ -285,6 +295,15 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
         }
     }
 
+    const refreshFoundryModelDir = async (modelAlias: string) => {
+        try {
+            const dir = await getFoundryLocalAsrModelDir(modelAlias)
+            setFoundryModelDir((current) => (current === dir ? current : dir))
+        } catch (err) {
+            console.warn("[localAsr] Foundry model dir query failed", err)
+        }
+    }
+
     const refreshSherpaStatus = async () => {
         try {
             const status = await getSherpaOnnxAsrStatus()
@@ -336,10 +355,25 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
             ])
             setSettings(s)
             setModels(list)
+            void Promise.all(
+                list.map(async (m) => {
+                    try {
+                        const dir = await getLocalAsrModelDir(m.id)
+                        setModelDirs((current) =>
+                            current[m.id] === dir
+                                ? current
+                                : { ...current, [m.id]: dir },
+                        )
+                    } catch (err) {
+                        console.warn("[localAsr] Qwen3 model dir query failed", err)
+                    }
+                }),
+            )
             void refreshEngineStatus()
             if (IS_WINDOWS) {
                 void refreshFoundryStatus()
                 void refreshFoundryCatalog()
+                void refreshFoundryModelDir(selectedFoundryAlias)
                 void refreshSherpaStatus()
                 void refreshSherpaCatalog()
                 void refreshSherpaModelDir(selectedSherpaAlias)
@@ -674,6 +708,76 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
         }
     }
 
+    const applyModelsBaseDir = async (modelsBaseDir: string | null) => {
+        setStorageBusy(true)
+        try {
+            setError(null)
+            const next = await setLocalAsrModelsBaseDir(modelsBaseDir)
+            setSettings((current) =>
+                current
+                    ? {
+                          ...current,
+                          modelsBaseDir: next.modelsBaseDir,
+                          modelsRootDir: next.modelsRootDir,
+                      }
+                    : current,
+            )
+            await refresh()
+            void refreshFoundryModelDir(selectedFoundryAlias)
+            void refreshSherpaModelDir(selectedSherpaAlias)
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e))
+        } finally {
+            setStorageBusy(false)
+        }
+    }
+
+    const handleChooseModelsBaseDir = async () => {
+        if (!isTauri) {
+            await applyModelsBaseDir("~/OpenLessModels")
+            return
+        }
+        const { open } = await import("@tauri-apps/plugin-dialog")
+        const picked = await open({
+            directory: true,
+            multiple: false,
+            title: t("localAsr.storageChooseTitle"),
+        })
+        if (!picked || Array.isArray(picked)) return
+        if (
+            !window.confirm(
+                t("localAsr.storageChangeConfirm", {
+                    path: picked,
+                }),
+            )
+        ) {
+            return
+        }
+        await applyModelsBaseDir(picked)
+    }
+
+    const handleResetModelsBaseDir = async () => {
+        if (
+            !window.confirm(
+                t("localAsr.storageResetConfirm", {
+                    path: settings?.modelsRootDir ?? "",
+                }),
+            )
+        ) {
+            return
+        }
+        await applyModelsBaseDir(null)
+    }
+
+    const handleRevealModelsRoot = async () => {
+        try {
+            setError(null)
+            await revealLocalAsrModelsRoot()
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e))
+        }
+    }
+
     const syncFoundryPrefs = async (
         modelAlias: FoundryLocalAsrModelAlias,
         enableProvider: boolean,
@@ -803,6 +907,43 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
             setError(null)
             await releaseFoundryLocalAsr()
             await refreshFoundryStatus()
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e))
+        } finally {
+            setFoundryBusy(null)
+        }
+    }
+
+    const handleRevealFoundryDir = async () => {
+        setFoundryBusy("reveal")
+        try {
+            setError(null)
+            await revealFoundryLocalAsrModelDir(selectedFoundryAlias)
+            await refreshFoundryModelDir(selectedFoundryAlias)
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e))
+        } finally {
+            setFoundryBusy(null)
+        }
+    }
+
+    const handleDeleteFoundry = async () => {
+        if (
+            !window.confirm(
+                t("localAsr.deleteConfirm", {
+                    name: selectedFoundryDisplayName,
+                }),
+            )
+        ) {
+            return
+        }
+        setFoundryBusy("delete")
+        try {
+            setError(null)
+            await deleteFoundryLocalAsrModel(selectedFoundryAlias)
+            await refreshFoundryStatus()
+            await refreshFoundryCatalog()
+            await refreshFoundryModelDir(selectedFoundryAlias)
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e))
         } finally {
@@ -954,6 +1095,15 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
     }
 
     const handleDeleteSherpa = async () => {
+        if (
+            !window.confirm(
+                t("localAsr.deleteConfirm", {
+                    name: selectedSherpaDisplayName,
+                }),
+            )
+        ) {
+            return
+        }
         setSherpaBusy("delete")
         try {
             setError(null)
@@ -1104,6 +1254,15 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
     }
 
     const handleDelete = async (modelId: string) => {
+        if (
+            !window.confirm(
+                t("localAsr.deleteConfirm", {
+                    name: modelId,
+                }),
+            )
+        ) {
+            return
+        }
         setBusyModelId(modelId)
         try {
             await deleteLocalAsrModel(modelId)
@@ -1113,6 +1272,20 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
                 return next
             })
             await refresh()
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e))
+        } finally {
+            setBusyModelId(null)
+        }
+    }
+
+    const handleRevealModelDir = async (modelId: string) => {
+        setBusyModelId(modelId)
+        try {
+            setError(null)
+            await revealLocalAsrModelDir(modelId)
+            const dir = await getLocalAsrModelDir(modelId)
+            setModelDirs((current) => ({ ...current, [modelId]: dir }))
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e))
         } finally {
@@ -1400,6 +1573,110 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
                 </Card>
             )}
 
+            <Card style={{ marginBottom: 16 }}>
+                <div
+                    style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 12,
+                    }}
+                >
+                    <div
+                        style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 16,
+                            flexWrap: "wrap",
+                        }}
+                    >
+                        <div style={{ minWidth: 0, flex: "1 1 360px" }}>
+                            <div
+                                style={{
+                                    fontSize: 14,
+                                    fontWeight: 700,
+                                    color: "var(--ol-ink)",
+                                    marginBottom: 6,
+                                }}
+                            >
+                                {t("localAsr.storageTitle")}
+                            </div>
+                            <div
+                                style={{
+                                    fontSize: 12.5,
+                                    color: "var(--ol-ink-3)",
+                                    lineHeight: 1.6,
+                                }}
+                            >
+                                <div>
+                                    <span
+                                        style={{ color: "var(--ol-ink-4)" }}
+                                    >
+                                        {t("localAsr.storageBaseDir")}:{" "}
+                                    </span>
+                                    <code>
+                                        {settings?.modelsBaseDir ??
+                                            t("localAsr.storageDefault")}
+                                    </code>
+                                </div>
+                                <div>
+                                    <span
+                                        style={{ color: "var(--ol-ink-4)" }}
+                                    >
+                                        {t("localAsr.storageModelsRoot")}:{" "}
+                                    </span>
+                                    <code>{settings?.modelsRootDir ?? "—"}</code>
+                                </div>
+                            </div>
+                        </div>
+                        <div
+                            style={{
+                                display: "flex",
+                                gap: 8,
+                                flexWrap: "wrap",
+                                justifyContent: "flex-end",
+                                alignContent: "flex-start",
+                            }}
+                        >
+                            <Btn
+                                variant="primary"
+                                size="sm"
+                                disabled={storageBusy}
+                                onClick={() => void handleChooseModelsBaseDir()}
+                            >
+                                {storageBusy
+                                    ? t("common.loading")
+                                    : t("localAsr.storageChoose")}
+                            </Btn>
+                            <Btn
+                                variant="ghost"
+                                size="sm"
+                                disabled={storageBusy || !settings?.modelsBaseDir}
+                                onClick={() => void handleResetModelsBaseDir()}
+                            >
+                                {t("localAsr.storageReset")}
+                            </Btn>
+                            <Btn
+                                variant="ghost"
+                                size="sm"
+                                disabled={storageBusy}
+                                onClick={() => void handleRevealModelsRoot()}
+                            >
+                                {t("localAsr.storageReveal")}
+                            </Btn>
+                        </div>
+                    </div>
+                    <div
+                        style={{
+                            fontSize: 12,
+                            color: "var(--ol-ink-4)",
+                            lineHeight: 1.55,
+                        }}
+                    >
+                        {t("localAsr.storageDesc")}
+                    </div>
+                </div>
+            </Card>
+
             {IS_WINDOWS && (
                 <Card style={{ marginBottom: 16 }}>
                     <div
@@ -1507,6 +1784,9 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
                                             setSelectedFoundryAlias(
                                                 e.target
                                                     .value as FoundryLocalAsrModelAlias,
+                                            )
+                                            void refreshFoundryModelDir(
+                                                e.target.value,
                                             )
                                             restoreScroll()
                                         }}
@@ -1704,6 +1984,12 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
                             </div>
                             <div>
                                 <span style={{ color: "var(--ol-ink-4)" }}>
+                                    {t("localAsr.modelDir")}:{" "}
+                                </span>
+                                <code>{foundryModelDir || "—"}</code>
+                            </div>
+                            <div>
+                                <span style={{ color: "var(--ol-ink-4)" }}>
                                     {t("localAsr.foundryLoadedModel")}:{" "}
                                 </span>
                                 {foundryStatus?.loadedModelId ??
@@ -1782,6 +2068,26 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
                                 {foundryBusy === "release"
                                     ? t("localAsr.foundryReleasing")
                                     : t("localAsr.releaseNow")}
+                            </Btn>
+                            <Btn
+                                variant="ghost"
+                                size="sm"
+                                disabled={foundryBusy !== null}
+                                onClick={() => void handleRevealFoundryDir()}
+                            >
+                                {foundryBusy === "reveal"
+                                    ? t("common.loading")
+                                    : t("localAsr.revealDir")}
+                            </Btn>
+                            <Btn
+                                variant="ghost"
+                                size="sm"
+                                disabled={foundryBusy !== null}
+                                onClick={() => void handleDeleteFoundry()}
+                            >
+                                {foundryBusy === "delete"
+                                    ? t("common.loading")
+                                    : t("localAsr.delete")}
                             </Btn>
                         </div>
                     </div>
@@ -2437,6 +2743,7 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
                         <ModelRow
                             key={model.id}
                             model={model}
+                            modelDir={modelDirs[model.id] ?? ""}
                             remoteSize={remoteSizes[model.id]}
                             progress={progress[model.id]}
                             isActive={settings?.activeModel === model.id}
@@ -2449,6 +2756,7 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
                             onDownload={() => void handleDownload(model.id)}
                             onCancel={() => void handleCancel(model.id)}
                             onDelete={() => void handleDelete(model.id)}
+                            onReveal={() => void handleRevealModelDir(model.id)}
                             onSetActive={() =>
                                 void handleSetActiveModel(model.id)
                             }
@@ -2690,6 +2998,7 @@ function DownloadProgressBlock({
 
 interface ModelRowProps {
     model: LocalAsrModelStatus
+    modelDir: string
     remoteSize?: RemoteSize
     progress?: LocalAsrDownloadProgress
     isActive: boolean
@@ -2700,12 +3009,14 @@ interface ModelRowProps {
     onDownload: () => void
     onCancel: () => void
     onDelete: () => void
+    onReveal: () => void
     onSetActive: () => void
     onTest: () => void
 }
 
 function ModelRow({
     model,
+    modelDir,
     remoteSize,
     progress,
     isActive,
@@ -2716,6 +3027,7 @@ function ModelRow({
     onDownload,
     onCancel,
     onDelete,
+    onReveal,
     onSetActive,
     onTest,
 }: ModelRowProps) {
@@ -2782,6 +3094,17 @@ function ModelRow({
                     </div>
                     <div style={{ fontSize: 12, color: "var(--ol-ink-3)" }}>
                         {model.hfRepo} · {sizeLabel}
+                    </div>
+                    <div
+                        style={{
+                            fontSize: 11,
+                            color: "var(--ol-ink-4)",
+                            marginTop: 4,
+                            wordBreak: "break-all",
+                        }}
+                    >
+                        {t("localAsr.modelDir")}:{" "}
+                        <code>{modelDir || "—"}</code>
                     </div>
                     {showProgress && (
                         <div style={{ marginTop: 10, maxWidth: 420 }}>
@@ -2864,6 +3187,14 @@ function ModelRow({
                             >
                                 {t("localAsr.delete")}
                             </Btn>
+                            <Btn
+                                variant="ghost"
+                                size="sm"
+                                disabled={disabled}
+                                onClick={onReveal}
+                            >
+                                {t("localAsr.revealDir")}
+                            </Btn>
                         </>
                     ) : isDownloading ? (
                         <Btn variant="ghost" size="sm" onClick={onCancel}>
@@ -2891,6 +3222,14 @@ function ModelRow({
                                     {t("localAsr.delete")}
                                 </Btn>
                             )}
+                            <Btn
+                                variant="ghost"
+                                size="sm"
+                                disabled={disabled}
+                                onClick={onReveal}
+                            >
+                                {t("localAsr.revealDir")}
+                            </Btn>
                         </>
                     )}
                 </div>

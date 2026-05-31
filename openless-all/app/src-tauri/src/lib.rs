@@ -411,6 +411,8 @@ pub fn run() {
             commands::validate_provider_credentials,
             commands::list_provider_models,
             commands::local_asr_get_settings,
+            commands::local_asr_storage_settings,
+            commands::local_asr_set_models_base_dir,
             commands::local_asr_set_active_model,
             commands::local_asr_set_mirror,
             commands::local_asr_list_models,
@@ -418,6 +420,9 @@ pub fn run() {
             commands::local_asr_download_model,
             commands::local_asr_cancel_download,
             commands::local_asr_delete_model,
+            commands::local_asr_model_dir,
+            commands::local_asr_reveal_model_dir,
+            commands::local_asr_reveal_models_root,
             commands::local_asr_test_model,
             commands::local_asr_engine_status,
             commands::local_asr_release_engine,
@@ -431,6 +436,9 @@ pub fn run() {
             commands::foundry_local_asr_prepare,
             commands::foundry_local_asr_cancel_prepare,
             commands::foundry_local_asr_release,
+            commands::foundry_local_asr_model_dir,
+            commands::foundry_local_asr_delete_model,
+            commands::foundry_local_asr_reveal_model_dir,
             #[cfg(target_os = "windows")]
             commands::sherpa_onnx_asr_status,
             #[cfg(target_os = "windows")]

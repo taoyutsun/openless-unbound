@@ -106,6 +106,10 @@ impl SherpaDownloadManager {
             log::info!("[sherpa-asr] 请求取消模型下载，但没有活跃任务: {model_alias}");
         }
     }
+
+    pub fn is_active(&self, model_alias: &str) -> bool {
+        self.cancel_flags.lock().contains_key(model_alias)
+    }
 }
 
 pub async fn fetch_remote_info(model_alias: &str, mirror: Mirror) -> Result<SherpaRemoteInfo> {

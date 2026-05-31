@@ -14,8 +14,16 @@ export interface LocalAsrSettings {
     providerId: string
     activeModel: string
     mirror: string
+    modelsBaseDir: string | null
+    modelsRootDir: string
     /** macOS 才编入 vendored Open-Less/qwen-asr 引擎；Win 端 UI 据此把"开始"按钮灰掉。 */
     engineAvailable: boolean
+}
+
+export interface LocalAsrStorageSettings {
+    modelsBaseDir: string | null
+    modelsRootDir: string
+    isDefault: boolean
 }
 
 export interface LocalAsrModelStatus {
@@ -172,6 +180,8 @@ const MOCK_SETTINGS: LocalAsrSettings = {
     providerId: "local-qwen3",
     activeModel: "qwen3-asr-0.6b",
     mirror: "huggingface",
+    modelsBaseDir: null,
+    modelsRootDir: "~/Library/Application Support/OpenLess/models",
     engineAvailable: false,
 }
 
@@ -195,6 +205,30 @@ export function getLocalAsrSettings(): Promise<LocalAsrSettings> {
         "local_asr_get_settings",
         undefined,
         () => MOCK_SETTINGS,
+    )
+}
+
+export function getLocalAsrStorageSettings(): Promise<LocalAsrStorageSettings> {
+    return invokeOrMock("local_asr_storage_settings", undefined, () => ({
+        modelsBaseDir: null,
+        modelsRootDir: MOCK_SETTINGS.modelsRootDir,
+        isDefault: true,
+    }))
+}
+
+export function setLocalAsrModelsBaseDir(
+    modelsBaseDir: string | null,
+): Promise<LocalAsrStorageSettings> {
+    return invokeOrMock(
+        "local_asr_set_models_base_dir",
+        { modelsBaseDir },
+        () => ({
+            modelsBaseDir,
+            modelsRootDir: modelsBaseDir
+                ? `${modelsBaseDir}/OpenLess/models`
+                : MOCK_SETTINGS.modelsRootDir,
+            isDefault: !modelsBaseDir,
+        }),
     )
 }
 
@@ -251,6 +285,26 @@ export function cancelLocalAsrDownload(modelId: string): Promise<void> {
 
 export function deleteLocalAsrModel(modelId: string): Promise<void> {
     return invokeOrMock("local_asr_delete_model", { modelId }, () => undefined)
+}
+
+export function getLocalAsrModelDir(modelId: string): Promise<string> {
+    return invokeOrMock("local_asr_model_dir", { modelId }, () => "")
+}
+
+export function revealLocalAsrModelDir(modelId: string): Promise<void> {
+    return invokeOrMock(
+        "local_asr_reveal_model_dir",
+        { modelId },
+        () => undefined,
+    )
+}
+
+export function revealLocalAsrModelsRoot(): Promise<void> {
+    return invokeOrMock(
+        "local_asr_reveal_models_root",
+        undefined,
+        () => undefined,
+    )
 }
 
 export interface LocalAsrTestResult {
@@ -375,6 +429,32 @@ export function cancelFoundryLocalAsrPrepare(): Promise<void> {
 
 export function releaseFoundryLocalAsr(): Promise<void> {
     return invokeOrMock("foundry_local_asr_release", undefined, () => undefined)
+}
+
+export function getFoundryLocalAsrModelDir(modelAlias: string): Promise<string> {
+    return invokeOrMock(
+        "foundry_local_asr_model_dir",
+        { modelAlias },
+        () => "",
+    )
+}
+
+export function deleteFoundryLocalAsrModel(modelAlias: string): Promise<void> {
+    return invokeOrMock(
+        "foundry_local_asr_delete_model",
+        { modelAlias },
+        () => undefined,
+    )
+}
+
+export function revealFoundryLocalAsrModelDir(
+    modelAlias: string,
+): Promise<void> {
+    return invokeOrMock(
+        "foundry_local_asr_reveal_model_dir",
+        { modelAlias },
+        () => undefined,
+    )
 }
 
 // ─── Sherpa-Onnx Local ASR ───────────────────────────────────────────
