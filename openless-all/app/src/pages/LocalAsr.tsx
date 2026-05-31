@@ -138,7 +138,10 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
     const [foundryProgress, setFoundryProgress] =
         useState<FoundryPrepareProgress | null>(null)
     const [foundryCancelRequested, setFoundryCancelRequested] = useState(false)
-    const [foundryModelDir, setFoundryModelDir] = useState("")
+    const [foundryModelDir, setFoundryModelDir] = useState<{
+        alias: FoundryLocalAsrModelAlias
+        dir: string
+    } | null>(null)
     const [sherpaStatus, setSherpaStatus] =
         useState<SherpaOnnxAsrStatus | null>(null)
     const [sherpaCatalog, setSherpaCatalog] = useState<
@@ -179,6 +182,8 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
     const sherpaDownloadRefreshTimer = useRef<number | null>(null)
     const engineStatusTimer = useRef<number | null>(null)
     const foundrySelectionDirty = useRef(false)
+    const selectedFoundryAliasRef =
+        useRef<FoundryLocalAsrModelAlias>("whisper-small")
     const sherpaSelectionDirty = useRef(false)
     const sherpaAnchorRef = useRef<HTMLDivElement>(null)
     const scrollGuard = useRef<{ scroller: HTMLElement; top: number } | null>(
@@ -252,6 +257,14 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
         }
     }
 
+    const setCurrentFoundryAlias = (alias: FoundryLocalAsrModelAlias) => {
+        if (selectedFoundryAliasRef.current !== alias) {
+            setFoundryModelDir(null)
+        }
+        selectedFoundryAliasRef.current = alias
+        setSelectedFoundryAlias(alias)
+    }
+
     const refreshEngineStatus = async () => {
         try {
             const status = await getLocalAsrEngineStatus()
@@ -269,7 +282,8 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
                 !foundrySelectionDirty.current &&
                 isFoundryAlias(status.activeModel)
             ) {
-                setSelectedFoundryAlias(status.activeModel)
+                setCurrentFoundryAlias(status.activeModel)
+                void refreshFoundryModelDir(status.activeModel)
             }
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err)
@@ -295,12 +309,31 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
         }
     }
 
-    const refreshFoundryModelDir = async (modelAlias: string) => {
+    const refreshFoundryModelDir = async (
+        modelAlias: FoundryLocalAsrModelAlias,
+    ) => {
         try {
             const dir = await getFoundryLocalAsrModelDir(modelAlias)
-            setFoundryModelDir((current) => (current === dir ? current : dir))
+            setFoundryModelDir((current) => {
+                if (selectedFoundryAliasRef.current !== modelAlias) {
+                    return current
+                }
+                if (current?.alias === modelAlias && current.dir === dir) {
+                    return current
+                }
+                return {
+                    alias: modelAlias,
+                    dir,
+                }
+            })
         } catch (err) {
             console.warn("[localAsr] Foundry model dir query failed", err)
+            setFoundryModelDir((current) =>
+                selectedFoundryAliasRef.current === modelAlias &&
+                current?.alias === modelAlias
+                    ? null
+                    : current,
+            )
         }
     }
 
@@ -1780,14 +1813,11 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
                                                 preserveEmbeddedScroll(
                                                     e.currentTarget,
                                                 )
+                                            const nextAlias = e.target
+                                                .value as FoundryLocalAsrModelAlias
                                             foundrySelectionDirty.current = true
-                                            setSelectedFoundryAlias(
-                                                e.target
-                                                    .value as FoundryLocalAsrModelAlias,
-                                            )
-                                            void refreshFoundryModelDir(
-                                                e.target.value,
-                                            )
+                                            setCurrentFoundryAlias(nextAlias)
+                                            void refreshFoundryModelDir(nextAlias)
                                             restoreScroll()
                                         }}
                                         disabled={foundryBusy !== null}
@@ -1986,7 +2016,12 @@ export function LocalAsr({ embedded = false }: LocalAsrProps = {}) {
                                 <span style={{ color: "var(--ol-ink-4)" }}>
                                     {t("localAsr.modelDir")}:{" "}
                                 </span>
-                                <code>{foundryModelDir || "—"}</code>
+                                <code>
+                                    {foundryModelDir?.alias ===
+                                    selectedFoundryAlias
+                                        ? foundryModelDir.dir
+                                        : "—"}
+                                </code>
                             </div>
                             <div>
                                 <span style={{ color: "var(--ol-ink-4)" }}>
