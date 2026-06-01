@@ -47,6 +47,16 @@ This fork keeps that foundation and focuses on practical constraints we ran into
 | App identity | `OpenLess` | `OpenLess Unbound`, with a separate data directory |
 | Update path | Official upstream | Independent fork, with upstream attribution preserved |
 
+## Recent Sync
+
+Starting with `v1.3.6-1`, OpenLess Unbound includes selected upstream OpenLess 1.3.6 beta improvements while keeping this fork's configurable Selection Q&A provider routing and Traditional Chinese TSF profile:
+
+- Local ASR model storage management.
+- Multi-monitor capsule positioning so the capsule follows the active input screen.
+- A short cooldown after Toggle recording sessions to reduce accidental immediate re-triggering.
+- MediaPlayPause hotkey trigger support.
+- Groq / OpenAI Whisper verbose JSON filtering to reduce hallucinated text from very short or silent audio.
+
 ## Installation
 
 Download the latest build from this repository's [Releases](../../releases) page.

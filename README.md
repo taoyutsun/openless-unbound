@@ -47,6 +47,16 @@ OpenLess Unbound 是基於 [OpenLess](https://github.com/Open-Less/openless) 的
 | App 身分 | `OpenLess` | `OpenLess Unbound`，獨立資料目錄 |
 | 更新路線 | 官方上游 | fork 獨立維護，保留上游歸屬 |
 
+## 近期同步內容
+
+`v1.3.6-1` 起，OpenLess Unbound 已整合部分上游 OpenLess 1.3.6 beta 改善，同時保留本 fork 的劃詞追問 provider 可配置性與繁體中文 TSF profile：
+
+- 本地 ASR 模型儲存管理。
+- 多螢幕環境下，膠囊提示跟隨目前輸入所在螢幕。
+- Toggle 錄音結束後加入短暫冷卻，降低誤觸後立即重新錄音的機率。
+- 支援 MediaPlayPause 熱鍵觸發。
+- Groq / OpenAI Whisper verbose JSON 過濾，降低極短音訊或靜音時產生幻覺文字的機率。
+
 ## 安裝
 
 請到本 repo 的 [Releases](../../releases) 頁面下載最新版本。
