@@ -817,6 +817,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
             model,
             whisper_prompt,
             batch_asr_chunk_limit_ms(&active_asr),
+            whisper_supports_verbose_json(&active_asr),
         ));
         store_asr_for_session(
             inner,

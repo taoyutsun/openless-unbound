@@ -30,6 +30,12 @@ pub struct WhisperBatchASR {
     prompt: Option<String>,
     /// OpenAI 互換でもファイル長に上限がある provider 用。None は従来通り一括送信。
     max_chunk_duration_ms: Option<u64>,
+    /// `response_format=verbose_json` を要求してセグメント単位のメタデータ
+    /// （no_speech_prob / avg_logprob / compression_ratio）で幻聴を捨てるか。
+    /// OpenAI / Groq の Whisper は full に対応。SenseVoice / TeleSpeech 等
+    /// （SiliconFlow）は response_format 自体が無いので false にして従来の
+    /// `json` のまま送る（壊さない）。
+    verbose_json: bool,
     buffer: Mutex<Vec<u8>>,
 }
 
@@ -40,6 +46,7 @@ impl WhisperBatchASR {
         model: String,
         prompt: Option<String>,
         max_chunk_duration_ms: Option<u64>,
+        verbose_json: bool,
     ) -> Self {
         Self {
             api_key,
@@ -47,6 +54,7 @@ impl WhisperBatchASR {
             model,
             prompt,
             max_chunk_duration_ms,
+            verbose_json,
             buffer: Mutex::new(Vec::new()),
         }
     }
@@ -111,6 +119,16 @@ impl WhisperBatchASR {
             .part("file", wav_part)
             .text("model", self.model.clone());
 
+        // verbose_json 対応プロバイダ（OpenAI / Groq）のときだけ、セグメント
+        // メタデータ付きの応答を要求し、temperature も 0 に固定する。非対応
+        // プロバイダ（SiliconFlow の SenseVoice / TeleSpeech 等）には送らず
+        // 従来どおりの応答にして、未知パラメータでの 4xx を避ける。
+        if self.verbose_json {
+            form = form
+                .text("response_format", "verbose_json")
+                .text("temperature", "0");
+        }
+
         // `prompt` は空文字を送らない：OpenAI 互換実装によっては空文字でエラーに
         // なるリスクがある（Groq は許容するが防御的にスキップ）。`trim()` で
         // 空白のみのケースも除外。
@@ -137,7 +155,13 @@ impl WhisperBatchASR {
         }
 
         let json: serde_json::Value = resp.json().await.context("parse Whisper response")?;
-        Ok(json["text"].as_str().unwrap_or("").trim().to_string())
+        if self.verbose_json {
+            // verbose_json：セグメントのメタデータで幻聴を除いた本文を組む。
+            // segments が無い応答では内部で従来どおり text にフォールバック。
+            Ok(extract_confident_text(&json))
+        } else {
+            Ok(json["text"].as_str().unwrap_or("").trim().to_string())
+        }
     }
 
     pub fn cancel(&self) {
@@ -149,6 +173,70 @@ impl crate::recorder::AudioConsumer for WhisperBatchASR {
     fn consume_pcm_chunk(&self, pcm: &[u8]) {
         self.buffer.lock().extend_from_slice(pcm);
     }
+}
+
+/// verbose_json 应答里去掉「幻听」段落后拼出正文。
+///
+/// Whisper 在静音 / 弱音 / 噪声段会生成「听起来合理但用户没说」的文本（已知
+/// hallucination 缺陷）：录音前后的沉默或麦克风底噪会变成无关词。verbose_json
+/// 的每个 segment 带 `no_speech_prob` / `avg_logprob` / `compression_ratio`，
+/// 用它们丢掉明显不是真实语音的段落。
+///
+/// 判定（命中任一即丢弃）：
+/// - `no_speech_prob > 0.6` 且 `avg_logprob < -0.5`：高静音概率且低置信，沉默被作话。
+/// - `compression_ratio > 2.4`：同一短语反复幻听（Whisper 标准阈值）。
+/// - `avg_logprob < -1.0`：置信极低，噪声被词化。
+///
+/// 误删真实语音最糟，所以阈值保守。没有 `segments` 字段（例如 provider 忽略了
+/// verbose_json）时退回直接用 `text`，与旧行为一致。元数据字段缺失时按
+/// 「不丢弃」处理（unwrap_or 默认值），所以对不返回这些指标的 provider 是无害空转。
+fn extract_confident_text(json: &serde_json::Value) -> String {
+    let Some(segments) = json.get("segments").and_then(|s| s.as_array()) else {
+        return json["text"].as_str().unwrap_or("").trim().to_string();
+    };
+
+    let mut kept = String::new();
+    for seg in segments {
+        let text = seg.get("text").and_then(|t| t.as_str()).unwrap_or("");
+        if text.trim().is_empty() {
+            continue;
+        }
+        let no_speech = seg
+            .get("no_speech_prob")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let avg_logprob = seg
+            .get("avg_logprob")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let compression = seg
+            .get("compression_ratio")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+
+        let is_hallucination = (no_speech > 0.6 && avg_logprob < -0.5)
+            || compression > 2.4
+            || avg_logprob < -1.0;
+        if is_hallucination {
+            log::warn!(
+                "[whisper] 丢弃疑似幻听段落: no_speech={:.2} avg_logprob={:.2} compression={:.2} text={:?}",
+                no_speech,
+                avg_logprob,
+                compression,
+                text.trim()
+            );
+            continue;
+        }
+        kept.push_str(text);
+    }
+
+    let kept = kept.trim().to_string();
+    if kept.is_empty() {
+        // 全部段落被判为幻听（≈整段几乎是静音）。回退到原始 text 会把幻听又捡
+        // 回来，所以返回空串；上层把空转写当「什么都没说」无害处理。
+        return String::new();
+    }
+    kept
 }
 
 fn pcm_duration_ms(pcm: &[u8]) -> u64 {
@@ -555,11 +643,57 @@ mod tests {
         assert_eq!(join_transcript_chunks(&chunks), "「中文」");
     }
 
+    #[test]
+    fn extract_confident_text_drops_hallucinated_segment() {
+        let json = serde_json::json!({
+            "text": "本当の発話 幻聴",
+            "segments": [
+                {"text": "本当の発話", "no_speech_prob": 0.01, "avg_logprob": -0.2, "compression_ratio": 1.2},
+                {"text": "幻聴", "no_speech_prob": 0.9, "avg_logprob": -0.8, "compression_ratio": 1.1},
+            ]
+        });
+        assert_eq!(extract_confident_text(&json), "本当の発話");
+    }
+
+    #[test]
+    fn extract_confident_text_keeps_all_confident_segments() {
+        let json = serde_json::json!({
+            "text": "ignored",
+            "segments": [
+                {"text": "前半", "no_speech_prob": 0.0, "avg_logprob": -0.1, "compression_ratio": 1.0},
+                {"text": "後半", "no_speech_prob": 0.0, "avg_logprob": -0.2, "compression_ratio": 1.0},
+            ]
+        });
+        assert_eq!(extract_confident_text(&json), "前半後半");
+    }
+
+    #[test]
+    fn extract_confident_text_falls_back_to_text_without_segments() {
+        let json = serde_json::json!({ "text": "  素の文字起こし  " });
+        assert_eq!(extract_confident_text(&json), "素の文字起こし");
+    }
+
+    #[test]
+    fn extract_confident_text_missing_metrics_keeps_segment() {
+        // provider が指標を返さない場合は「不丢弃」＝そのまま残す（無害空転）。
+        let json = serde_json::json!({
+            "text": "x",
+            "segments": [ {"text": "保留される"} ]
+        });
+        assert_eq!(extract_confident_text(&json), "保留される");
+    }
+
     #[tokio::test]
     async fn transcribe_posts_single_request_without_chunk_limit() {
         let (base_url, server) = start_whisper_test_server(vec!["one"]);
-        let asr =
-            WhisperBatchASR::new("key".to_string(), base_url, "model".to_string(), None, None);
+        let asr = WhisperBatchASR::new(
+            "key".to_string(),
+            base_url,
+            "model".to_string(),
+            None,
+            None,
+            false,
+        );
         let pcm = vec![0u8; 32_000 * 65];
         asr.consume_pcm_chunk(&pcm);
 
@@ -579,6 +713,7 @@ mod tests {
             "model".to_string(),
             None,
             Some(30_000),
+            false,
         );
         let pcm = vec![0u8; 32_000 * 65];
         asr.consume_pcm_chunk(&pcm);
