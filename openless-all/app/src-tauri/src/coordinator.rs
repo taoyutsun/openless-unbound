@@ -249,6 +249,10 @@ struct Inner {
     /// 与 `hotkey_trigger_held` 互补 —— held 防 press-without-release，本字段防
     /// press-release-press 三连过快。
     last_hotkey_dispatch_at: Mutex<Option<std::time::Instant>>,
+    /// end_session 成功收尾后将 phase 设为 Idle 时记录的时间戳 + POST_SESSION_COOLDOWN_MS。
+    /// handle_pressed 在 (Toggle, Idle) 分支检查此字段：未过期则忽略该次按键，
+    /// 防止胶囊离场动画期间误激活新听写（issue #545）。
+    session_cooldown_until: Mutex<Option<std::time::Instant>>,
     shortcut_recording_active: AtomicBool,
     /// 自定义组合键监听器（global-hotkey crate）。当 `prefs.hotkey.trigger == Custom` 时
     /// 代替 modifier-only 的 hotkey monitor。`None` 表示不使用自定义组合键或还没成功安装。
@@ -336,6 +340,7 @@ impl Coordinator {
                     hotkey_status: Mutex::new(HotkeyStatus::default()),
                     hotkey_trigger_held: AtomicBool::new(false),
                     last_hotkey_dispatch_at: Mutex::new(None),
+                    session_cooldown_until: Mutex::new(None),
                     shortcut_recording_active: AtomicBool::new(false),
                     combo_hotkey: Mutex::new(None),
                     translation_hotkey: Mutex::new(None),
@@ -397,6 +402,7 @@ impl Coordinator {
                 hotkey_status: Mutex::new(HotkeyStatus::default()),
                 hotkey_trigger_held: AtomicBool::new(false),
                 last_hotkey_dispatch_at: Mutex::new(None),
+                session_cooldown_until: Mutex::new(None),
                 shortcut_recording_active: AtomicBool::new(false),
                 combo_hotkey: Mutex::new(None),
                 translation_hotkey: Mutex::new(None),
@@ -4595,6 +4601,11 @@ fn enabled_phrases(inner: &Arc<Inner>) -> Vec<String> {
 /// 终止态（Done / Cancelled / Error）后延迟 N ms 把胶囊改回 Idle，让浮窗自动消失。
 /// 用户点 ✕ / ✓ / 中途出错 / 按 Esc 都走这里，统一 2 秒。
 const CAPSULE_AUTO_HIDE_DELAY_MS: u64 = 2000;
+
+/// Toggle 模式下，end_session 将 phase 设为 Idle 后在此时间内禁止新的 begin_session。
+/// 避免用户三连按时第 3 次按下误激活新听写（此时胶囊仍在离场动画周期内）。
+/// 值取 capsule EXIT_ANIM_MS (360ms) + 余量 ≈ 600ms。
+const POST_SESSION_COOLDOWN_MS: u64 = 600;
 
 /// Coordinator 全局超时保护：防止 ASR await_final_result() 永远挂起。
 /// 设置为 15 秒（比 ASR 的 12 秒 FINAL_RESULT_TIMEOUT 稍长），
