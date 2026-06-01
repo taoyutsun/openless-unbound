@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, PageHeader } from './_atoms';
+import { Toggle } from './settings/shared';
 import { SavedToast } from '../components/SavedToast';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { defaultQaShortcut, formatComboLabel } from '../lib/hotkey';
@@ -15,11 +16,28 @@ import type { UserPreferences } from '../lib/types';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
 
+const QA_LLM_PROVIDER_OPTIONS = [
+  { id: '', labelKey: 'selectionAsk.answerModel.inherit', modelPlaceholder: '' },
+  { id: 'ark', labelKey: 'settings.providers.presets.ark', modelPlaceholder: 'deepseek-v3-2' },
+  { id: 'deepseek', labelKey: 'settings.providers.presets.deepseek', modelPlaceholder: 'deepseek-v4-flash' },
+  { id: 'siliconflow', labelKey: 'settings.providers.presets.siliconflow', modelPlaceholder: 'Qwen/Qwen2.5-7B-Instruct' },
+  { id: 'openai', labelKey: 'settings.providers.presets.openai', modelPlaceholder: 'gpt-4o' },
+  { id: 'gemini', labelKey: 'settings.providers.presets.gemini', modelPlaceholder: 'gemini-2.5-flash' },
+  { id: 'codex_oauth', labelKey: 'settings.providers.presets.codexOAuth', modelPlaceholder: 'gpt-5.3-codex-spark' },
+  { id: 'mimo', labelKey: 'settings.providers.presets.mimo', modelPlaceholder: 'xiaomi/mimo-v2-flash' },
+  { id: 'cometapi', labelKey: 'settings.providers.presets.cometapi', modelPlaceholder: 'gpt-4o' },
+  { id: 'openrouterFree', labelKey: 'settings.providers.presets.openrouterFree', modelPlaceholder: 'qwen/qwen3-coder:free' },
+  { id: 'alibabaCoding', labelKey: 'settings.providers.presets.alibabaCoding', modelPlaceholder: 'qwen3-coder-plus' },
+  { id: 'codingPlanX', labelKey: 'settings.providers.presets.codingPlanX', modelPlaceholder: 'gpt-5-mini' },
+  { id: 'custom', labelKey: 'settings.providers.presets.custom', modelPlaceholder: 'openai/gpt-oss-120b' },
+] as const;
+
 export function SelectionAsk() {
   const { t } = useTranslation();
   const { prefs, refresh, updatePrefs: savePrefs } = useHotkeySettings();
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMessage, setSaveMessage] = useState('');
+  const [qaModelDraft, setQaModelDraft] = useState('');
   const statusTimer = useRef<number | null>(null);
   const defaultHotkeyLabel = formatComboLabel(defaultQaShortcut());
   const recordHotkeyLabel = prefs ? formatComboLabel(prefs.dictationHotkey) : '快捷键';
@@ -27,6 +45,10 @@ export function SelectionAsk() {
   useEffect(() => () => {
     if (statusTimer.current !== null) window.clearTimeout(statusTimer.current);
   }, []);
+
+  useEffect(() => {
+    setQaModelDraft(prefs?.qaLlmModel ?? '');
+  }, [prefs?.qaLlmModel]);
 
   const showSaveStatus = (state: SaveState, message: string, temporary = false) => {
     if (statusTimer.current !== null) {
@@ -81,8 +103,44 @@ export function SelectionAsk() {
     );
   };
 
+  const onAnswerProviderChange = (providerId: string) => {
+    showSaveStatus('saving', t('common.saving'));
+    setQaModelDraft('');
+    void persistPrefs(
+      current => ({
+        ...current,
+        qaLlmProvider: providerId || null,
+        qaLlmModel: null,
+      }),
+      t('selectionAsk.save.answerModelSaveFailed'),
+    );
+  };
+
+  const commitAnswerModel = () => {
+    const nextModel = qaModelDraft.trim();
+    const currentModel = prefs.qaLlmModel ?? '';
+    if (nextModel === currentModel) return;
+    showSaveStatus('saving', t('common.saving'));
+    void persistPrefs(
+      current => ({ ...current, qaLlmModel: nextModel || null }),
+      t('selectionAsk.save.answerModelSaveFailed'),
+    );
+  };
+
+  const onAnswerThinkingChange = (enabled: boolean) => {
+    showSaveStatus('saving', t('common.saving'));
+    void persistPrefs(
+      current => ({ ...current, qaLlmThinkingEnabled: enabled }),
+      t('selectionAsk.save.answerModelSaveFailed'),
+    );
+  };
+
   const enabled = prefs.qaHotkey !== null;
   const currentLabel = prefs.qaHotkey ? formatComboLabel(prefs.qaHotkey) : defaultHotkeyLabel;
+  const answerProvider = prefs.qaLlmProvider ?? '';
+  const answerProviderOption =
+    QA_LLM_PROVIDER_OPTIONS.find(option => option.id === answerProvider) ?? QA_LLM_PROVIDER_OPTIONS[0];
+  const answerThinkingEnabled = prefs.qaLlmThinkingEnabled ?? prefs.llmThinkingEnabled;
   const saving = saveState === 'saving';
 
   return (
@@ -142,6 +200,67 @@ export function SelectionAsk() {
         </div>
 
         {/* 2. 使用方法 */}
+        <Card>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{t('selectionAsk.answerModel.title')}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '120px minmax(0, 1fr)', gap: '10px 14px', alignItems: 'center' }}>
+            <label style={{ fontSize: 12.5, color: 'var(--ol-ink-2)' }}>{t('selectionAsk.answerModel.provider')}</label>
+            <select
+              value={answerProvider}
+              disabled={saving}
+              onChange={event => onAnswerProviderChange(event.currentTarget.value)}
+              style={{
+                width: '100%',
+                height: 34,
+                borderRadius: 8,
+                border: '1px solid var(--ol-line)',
+                background: 'var(--ol-bg)',
+                color: 'var(--ol-ink-1)',
+                padding: '0 10px',
+                fontSize: 13,
+              }}
+            >
+              {QA_LLM_PROVIDER_OPTIONS.map(option => (
+                <option key={option.id || 'inherit'} value={option.id}>
+                  {t(option.labelKey)}
+                </option>
+              ))}
+            </select>
+
+            <label style={{ fontSize: 12.5, color: 'var(--ol-ink-2)' }}>{t('selectionAsk.answerModel.model')}</label>
+            <input
+              value={qaModelDraft}
+              disabled={!answerProvider || saving}
+              placeholder={answerProviderOption.modelPlaceholder}
+              onChange={event => setQaModelDraft(event.currentTarget.value)}
+              onBlur={commitAnswerModel}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.currentTarget.blur();
+                }
+              }}
+              style={{
+                width: '100%',
+                height: 34,
+                borderRadius: 8,
+                border: '1px solid var(--ol-line)',
+                background: answerProvider ? 'var(--ol-bg)' : 'rgba(0,0,0,0.035)',
+                color: 'var(--ol-ink-1)',
+                padding: '0 10px',
+                fontSize: 13,
+                boxSizing: 'border-box',
+              }}
+            />
+
+            <label style={{ fontSize: 12.5, color: 'var(--ol-ink-2)' }}>{t('settings.providers.thinkingModeLabel')}</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Toggle on={answerThinkingEnabled} onToggle={next => onAnswerThinkingChange(next)} />
+              <span style={{ fontSize: 11.5, color: answerThinkingEnabled ? 'var(--ol-blue)' : 'var(--ol-ink-4)' }}>
+                {answerThinkingEnabled ? t('settings.providers.thinkingModeOn') : t('settings.providers.thinkingModeOff')}
+              </span>
+            </div>
+          </div>
+        </Card>
+
         <Card>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{t('selectionAsk.howto.title')}</div>
           <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: 'var(--ol-ink-2)', lineHeight: 1.7 }}>

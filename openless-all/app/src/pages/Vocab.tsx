@@ -1,5 +1,5 @@
-// Vocab.tsx — 接 Tauri 后端 list_vocab / add_vocab / remove_vocab / set_vocab_enabled。
-// 数据落地到 ~/Library/Application Support/OpenLess/dictionary.json（与 Swift 同名）。
+﻿// Vocab.tsx — 接 Tauri 后端 list_vocab / add_vocab / remove_vocab / set_vocab_enabled。
+// 数据落地到 ~/Library/Application Support/OpenLess Unbound/dictionary.json（与 Swift 同名）。
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';

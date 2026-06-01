@@ -1,140 +1,98 @@
-# OpenLess 使用指南
+# OpenLess Unbound 使用補充
 
-## 安装
+這份文件補充 `README.md` 未展開的日常使用細節。首次使用請先閱讀 `README.md`，再依照本文件調整日常工作流。
 
-### macOS
+## 安裝版與免安裝版
 
-1. 从 [Releases](https://github.com/appergb/openless/releases/latest) 下载 `OpenLess_<版本>_aarch64.dmg`。
-2. 打开 dmg，将 OpenLess.app 拖入「应用程序」文件夹。
-3. 双击启动。
+- `OpenLess_Unbound_<version>_x64.msi`：安裝到系統，會註冊必要的 Windows 輸入法後端，適合長期使用。
+- `OpenLess_Unbound_<version>_x64_portable.zip`：免安裝版，適合短期測試或驗證設定。
 
-### Windows
+Windows 的 TSF 輸入法後端需要註冊到系統。若你要長期使用語音輸入，建議使用 MSI 安裝版。
 
-1. 从 [Releases](https://github.com/appergb/openless/releases/latest) 下载 `OpenLess_<版本>_x64-setup.exe`。
-2. 运行安装程序，按提示完成安装。
-3. 从开始菜单启动 OpenLess。
+## 服務設定
 
----
+OpenLess Unbound 的服務設定主要分成兩類：
 
-## 首次配置
+- ASR：把語音轉成文字，例如 Groq Whisper、OpenAI Whisper-compatible endpoint、Foundry Local Whisper、Sherpa-ONNX local，或其他支援 provider。
+- LLM：把文字潤色、整理、翻譯，或回答劃詞追問，例如 Codex OAuth、Groq、OpenAI、Gemini、OpenRouter 或自訂 OpenAI-compatible endpoint。
 
-### macOS 权限
+一般語音輸入可以使用速度較快、成本較低的模型；劃詞追問可以獨立改用品質較高或更適合推理的模型。
 
-首次启动后，在「系统设置 → 隐私与安全」中授予以下权限：
+## 一般語音輸入
 
-1. **麦克风** — 允许 OpenLess 录音。
-2. **辅助功能** — 允许 OpenLess 读写当前焦点输入框。授权后须**完全退出并重新启动** OpenLess，快捷键才会生效。
+預設流程：
 
-### Windows 权限
+1. 把游標放到目標 app 的文字輸入位置。
+2. 按 Right Ctrl 開始錄音。
+3. 再按 Right Ctrl 停止錄音。
+4. ASR 轉寫完成後，LLM 會依目前「風格」設定潤色。
+5. 結果會自動插入游標位置。
 
-1. 按系统提示授予**麦克风**权限。
-2. 打开 OpenLess → 「设置 → 权限」，确认全局快捷键监听器状态显示为「已启动」。
+如果插入目標是終端機或特殊 app，可到「設定 → 通用 → 插入與剪貼板」調整模擬貼上快捷鍵，例如 `Ctrl+V`、`Ctrl+Shift+V` 或 `Shift+Insert`。
 
-### 填入凭据
+## 即時翻譯
 
-不会配火山 ASR 的话，先看这篇图文引导：  
-[OpenLess 火山 ASR 配置](docs/volcengine-setup.md)
+預設流程：
 
-打开 OpenLess → **设置**，填入以下字段：
+1. 到「翻譯」頁面選擇工作語言。
+2. 選擇翻譯目標語言；若選「不啟用」，Shift 不會觸發翻譯。
+3. 按 Right Ctrl 開始錄音。
+4. 錄音中按一下 Shift，畫面底部會顯示藍色「正在翻譯」標識。
+5. 再按 Right Ctrl 停止錄音，翻譯結果會插入游標位置。
 
-| 字段 | 说明 |
-| --- | --- |
-| 火山引擎 App ID | 语音识别服务的应用 ID |
-| 火山引擎 Access Token | 语音识别访问凭据 |
-| 火山引擎 Resource ID | 语音识别资源 ID |
-| Ark API Key | 文本润色服务的 API Key |
-| Ark Model ID | 使用的模型 ID（如 `doubao-pro-32k`） |
-| Ark Endpoint | 接口地址，默认 `https://ark.cn-beijing.volces.com/api/v3/chat/completions` |
+翻譯失敗時會回退為插入原始轉寫，不會直接丟失內容。
 
-保存后设置立即生效，无需重启。
+## 劃詞追問
 
----
+預設流程：
 
-## 基本使用
+1. 按 `Ctrl+Shift+;` 開啟浮窗。
+2. 選取 app 內文字。
+3. 按 Right Ctrl 開始錄音。
+4. 再按 Right Ctrl 停止錄音並送出。
+5. 可繼續按 Right Ctrl 追問。
+6. 按 Esc 關閉浮窗。
 
-### 开始录音
+目前劃詞追問不內建即時上網搜尋。如果你問匯率、天氣、新聞等即時資訊，模型能否回答取決於你選用的 provider 與模型能力。
 
-按下全局快捷键（默认 macOS 右 Option，Windows 右 Control）。  
-屏幕边缘会出现状态胶囊，显示「录音中」。
+## 詞彙表
 
-### 结束录音
+詞彙表適合放：
 
-再次按下同一快捷键。OpenLess 会：
+- 人名、地名、公司名
+- 英文工具與產品名，例如 Codex、Claude Code、OpenClaw
+- 專案名、部落格名、品牌名
+- 容易被 ASR 誤判的中文或中英混合詞
 
-1. 停止录音并发送音频进行转写。
-2. 对转写结果按当前输出模式进行润色。
-3. 将润色后的文字插入当前焦点输入框（失败时自动复制到剪贴板）。
+OpenLess Unbound 會把啟用的詞彙送入 ASR prompt 或 LLM prompt，並在輸出命中時累加 hits。
 
-### 取消录音
+## Windows 輸入法
 
-录音过程中按 `Esc`，当前录音内容会被丢弃，不做任何插入。
+OpenLess Unbound 的 Windows TSF 後端註冊為繁體中文台灣 profile，目標是避免語音輸入後切到簡體中文輸入法。
 
----
+如果遇到輸入法後端顯示不可用，通常表示 TSF 註冊沒有完成或被 Windows 清掉。請重新執行 MSI 安裝版，或安裝新版 release。
 
-## 输出模式
+## 本機資料位置
 
-在 OpenLess 主窗口的胶囊或「设置」中切换模式：
+OpenLess Unbound 的使用者資料預設在：
 
-| 模式 | 说明 |
-| --- | --- |
-| 原文 | 直接输出转写文字，不做任何修改 |
-| 轻度润色 | 修正语气词、标点、明显错字，保留原意 |
-| 清晰结构（AI prompt 模式） | 把口语整理成有结构、有约束、有上下文的 prompt，适合直接喂给 ChatGPT / Claude / Cursor |
-| 正式表达 | 将口语转换为正式书面语 |
+```text
+%APPDATA%\OpenLess Unbound
+```
 
----
+常見檔案：
 
-## 词典
+- `preferences.json`：偏好設定。
+- `history.json`：歷史紀錄。
+- `dictionary.json`：詞彙表，可自行備份；分享前請確認沒有私人資訊。
 
-词典用于提高特定词汇的识别准确率（产品名、人名、专有名词等）。
+## 批次匯入詞彙
 
-1. 打开主窗口 → **词典**。
-2. 点击「新建」，填入正确拼写、分类和备注。
-3. 启用后，词条会作为热词注入 ASR 识别阶段，并在润色阶段辅助语义判断。
+本 repo 提供匯入輔助腳本，可把文字、CSV 或剪貼簿詞彙匯入 OpenLess Unbound：
 
----
+```powershell
+cd openless-all/app
+powershell -ExecutionPolicy Bypass -File .\scripts\import-openless-unbound-vocab.ps1 -InputFile .\terms.txt
+```
 
-## 历史记录
-
-主窗口 → **历史**，可查看所有录音记录，包括原始转写和润色结果。
-
----
-
-## 更换快捷键
-
-主窗口 → **设置 → 快捷键**，选择触发键。  
-macOS 支持右侧修饰键（Option / Control / Command / Shift）；Windows 支持右 Control。
-
----
-
-## 常见问题
-
-**Q: 快捷键没反应？**  
-macOS：确认已授予辅助功能权限，且授权后重启过 OpenLess。  
-Windows：在「设置 → 权限」中检查监听器状态。
-
-**Q: 识别结果为空或是占位文字？**  
-检查火山引擎 ASR 凭据是否填写正确。填写正确后识别才能正常工作。
-
-**Q: 文字没有插入，只是复制到了剪贴板？**  
-当目标输入框不支持辅助功能写入时（如某些安全限制的应用），OpenLess 会自动回退到剪贴板复制，手动粘贴即可。
-
-**Q: 在 Windows 玩 Minecraft 等全屏游戏时，OpenLess capsule 不弹出 / 字符无法输入？**  
-这是 **Windows 操作系统层面的限制**，OpenLess 应用本身无法绕过（详见 [issue #457](https://github.com/Open-Less/openless/issues/457)）：
-
-- **独占全屏（exclusive fullscreen）**：标准应用窗口（包括 OpenLess capsule）**不会绘制在独占全屏 DirectX/OpenGL 应用之上**。请把游戏切换到 **无边框窗口化全屏（Borderless Windowed Fullscreen）**。Minecraft：视频设置 → 全屏 关闭（保持窗口最大化即可）。
-- **管理员权限不一致（UIPI）**：若游戏以管理员身份运行而 OpenLess 不是，Windows 阻止 OpenLess 接收游戏前台的按键，hotkey 完全不触发。让两者权限对齐（要么都以管理员运行，要么都以普通用户运行）。
-- **游戏聊天框未打开**：识别字符通过模拟键盘事件落字。Minecraft 中必须先按 `T` 打开聊天框，OpenLess 的输入才会落到聊天里。
-
-macOS 不存在独占全屏（所有"全屏"都是带 Spaces 的无边框窗口），所以此限制不适用。
-
-**Q: 润色结果和预期不符？**  
-尝试切换输出模式，或在词典中添加相关专有名词。
-
----
-
-## 社区与支持
-
-欢迎通过 QQ 加入用户群，反馈问题或交流使用体验：
-
-**QQ 群：1078960553**
+匯入前腳本會去重；若既有詞條被停用，會重新啟用。已有 `dictionary.json` 時會先備份。

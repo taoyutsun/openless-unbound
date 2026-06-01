@@ -13,6 +13,7 @@ import { Icon } from './Icon';
 import { SavedToast } from './SavedToast';
 import { useSavedToastListener } from '../lib/savedEvent';
 import { openExternal } from '../lib/ipc';
+import { OPENLESS_UNBOUND_LINKS } from '../lib/aboutLinks';
 import type { OS } from './WindowChrome';
 import { GeneralTab, ServicesTab, PrivacyTab, AdvancedTab } from '../pages/settings/tabs';
 import { AboutSection } from '../pages/settings/AboutSection';
@@ -38,8 +39,8 @@ interface ModalNavItem {
   href?: string;
 }
 
-const HELP_URL = 'https://github.com/appergb/openless#readme';
-const RELEASE_NOTES_URL = 'https://github.com/appergb/openless/releases';
+const HELP_URL = OPENLESS_UNBOUND_LINKS.docs;
+const RELEASE_NOTES_URL = OPENLESS_UNBOUND_LINKS.releases;
 
 // 第一组：可选中的 tab；第二组：外部链接（永远不 active）。
 const TAB_ITEMS: ModalNavItem[] = [

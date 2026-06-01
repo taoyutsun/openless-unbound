@@ -119,7 +119,7 @@ function Get-PackageVersion {
 }
 
 function Get-MsiName {
-  return "OpenLess_$(Get-PackageVersion)_x64_en-US.msi"
+  return "OpenLess_Unbound_$(Get-PackageVersion)_x64.msi"
 }
 
 function Get-MsiPath {
@@ -161,7 +161,30 @@ function Invoke-MsvcBuild {
   if ($LASTEXITCODE -ne 0) {
     Write-Warning "Tauri Windows MSI build returned exit code $LASTEXITCODE. Trying to finish MSI linking from generated WiX objects."
     Repair-TauriMsiBundle
+  } else {
+    Normalize-TauriMsiName
   }
+}
+
+function Normalize-TauriMsiName {
+  $msiPath = Get-MsiPath
+  if (Test-Path $msiPath) {
+    return
+  }
+
+  $bundleDir = Split-Path -Parent $msiPath
+  $version = Get-PackageVersion
+  $candidate = Get-ChildItem -LiteralPath $bundleDir -Filter "*.msi" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like "OpenLess*${version}*_x64*.msi" } |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+
+  if ($null -eq $candidate) {
+    throw "MSI not found: $msiPath"
+  }
+
+  Copy-Item -LiteralPath $candidate.FullName -Destination $msiPath -Force
+  Write-Host "[ok] Normalized MSI name -> $msiPath"
 }
 
 function Repair-TauriMsiBundle {
@@ -201,7 +224,7 @@ function Invoke-OpenLessImeBuild {
   $buildScript = Join-Path $PSScriptRoot "windows-ime-build.ps1"
 
   if (-not (Test-Path $buildScript)) {
-    throw "OpenLess IME build script not found: $buildScript"
+    throw "OpenLess Unbound IME build script not found: $buildScript"
   }
 
   $targets = @(
@@ -271,7 +294,7 @@ function Copy-WindowsArtifacts {
   Reset-ArtifactsRoot
   Copy-Item -LiteralPath $msiPath -Destination (Join-Path $ArtifactsRoot $msiName) -Force
 
-  $portableName = "OpenLess_${version}_x64_portable"
+  $portableName = "OpenLess_Unbound_${version}_x64_portable"
   $portableRoot = Join-Path $ArtifactsRoot $portableName
   $portableImeRoot = Join-Path $portableRoot "windows-ime"
   $portableImeX64Root = Join-Path $portableImeRoot "x64"

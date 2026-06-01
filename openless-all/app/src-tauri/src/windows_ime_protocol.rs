@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const OPENLESS_IME_PROTOCOL_VERSION: u32 = 1;
-pub const OPENLESS_IME_PIPE_NAME_PREFIX: &str = r"\\.\pipe\OpenLessImeSubmit";
+pub const OPENLESS_IME_PIPE_NAME_PREFIX: &str = r"\\.\pipe\OpenLessUnboundImeSubmit";
 
 pub fn ime_pipe_name_for_target(process_id: u32, thread_id: u32) -> String {
     format!("{OPENLESS_IME_PIPE_NAME_PREFIX}-{process_id}-{thread_id}")
@@ -131,7 +131,7 @@ mod tests {
     fn ime_pipe_name_includes_target_process_and_thread() {
         assert_eq!(
             ime_pipe_name_for_target(1234, 5678),
-            r"\\.\pipe\OpenLessImeSubmit-1234-5678"
+            r"\\.\pipe\OpenLessUnboundImeSubmit-1234-5678"
         );
     }
 
@@ -139,17 +139,17 @@ mod tests {
     fn ime_pipe_candidates_include_same_process_clients_after_exact_target() {
         let available = vec![
             r"\\.\pipe\OtherPipe".to_string(),
-            r"\\.\pipe\OpenLessImeSubmit-4321-1111".to_string(),
-            r"\\.\pipe\OpenLessImeSubmit-1234-9999".to_string(),
-            r"\\.\pipe\OpenLessImeSubmit-1234-5678".to_string(),
-            r"\\.\pipe\OpenLessImeSubmit-1234-bad".to_string(),
+            r"\\.\pipe\OpenLessUnboundImeSubmit-4321-1111".to_string(),
+            r"\\.\pipe\OpenLessUnboundImeSubmit-1234-9999".to_string(),
+            r"\\.\pipe\OpenLessUnboundImeSubmit-1234-5678".to_string(),
+            r"\\.\pipe\OpenLessUnboundImeSubmit-1234-bad".to_string(),
         ];
 
         assert_eq!(
             ime_pipe_candidate_names_for_target(1234, 5678, available),
             vec![
-                r"\\.\pipe\OpenLessImeSubmit-1234-5678".to_string(),
-                r"\\.\pipe\OpenLessImeSubmit-1234-9999".to_string(),
+                r"\\.\pipe\OpenLessUnboundImeSubmit-1234-5678".to_string(),
+                r"\\.\pipe\OpenLessUnboundImeSubmit-1234-9999".to_string(),
             ]
         );
     }

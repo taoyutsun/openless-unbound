@@ -65,6 +65,9 @@ for (const fragment of requiredFragments) {
 assert.match(script, /\[switch\]\$SkipRustInstall/, "script should support opting out of Rust installation");
 assert.match(script, /\[switch\]\$SkipNpmCi/, "script should support reusing existing node_modules");
 assert.match(script, /\[switch\]\$CleanArtifacts/, "script should support cleaning the output directory");
+assert.match(script, /OpenLess_Unbound_\$\(Get-PackageVersion\)_x64\.msi/, "MSI artifact name should avoid implying a US-only locale");
+assert.doesNotMatch(script, /OpenLess_Unbound_\$\(Get-PackageVersion\)_x64_en-US\.msi/, "MSI artifact name should not include en-US");
+assert.match(script, /Normalize-TauriMsiName/, "script should normalize Tauri's locale-suffixed MSI name when native bundling succeeds");
 assert.doesNotMatch(script, /WixTools314/, "MSVC packaging must not hard-code a single Tauri WiX tools version");
 assert.doesNotMatch(ciWorkflow, /WixTools314/, "CI MSI repair must not hard-code a single Tauri WiX tools version");
 assert.match(script, /-Filter "WixTools\*"/, "MSVC packaging should discover Tauri WiX tools by WixTools* glob");
@@ -137,18 +140,21 @@ assert.match(nsisHook, /OPENLESS_IME_ABORT_IF_FAILED \$0 "x86 registration"/, "N
 assert.match(nsisHook, /OPENLESS_IME_REGISTER_X86[\s\S]*\$\{If\} \$0 != 0[\s\S]*StrCpy \$1 \$0[\s\S]*OPENLESS_IME_UNREGISTER_X64[\s\S]*StrCpy \$0 \$1[\s\S]*OPENLESS_IME_ABORT_IF_FAILED \$0 "x86 registration"/, "NSIS install should roll back x64 registration before aborting on x86 registration failure");
 assert.doesNotMatch(nsisHook, /OPENLESS_IME_ABORT_IF_FAILED \$0 "x64 unregistration"/, "NSIS uninstall should not fail if x64 TSF unregistration fails");
 assert.doesNotMatch(nsisHook, /OPENLESS_IME_ABORT_IF_FAILED \$0 "x86 unregistration"/, "NSIS uninstall should not fail if x86 TSF unregistration fails");
-assert.match(nsisHook, /OpenLess x64 TSF IME unregister exit code \$0/, "NSIS uninstall should log x64 TSF unregistration failures");
-assert.match(nsisHook, /OpenLess x86 TSF IME unregister exit code \$0/, "NSIS uninstall should log x86 TSF unregistration failures");
+assert.match(nsisHook, /OpenLess Unbound x64 TSF IME unregister exit code \$0/, "NSIS uninstall should log x64 TSF unregistration failures");
+assert.match(nsisHook, /OpenLess Unbound x86 TSF IME unregister exit code \$0/, "NSIS uninstall should log x86 TSF unregistration failures");
 
 assert.match(imeInstallSmoke, /\[ValidateSet\("nsis", "msi"\)\]/, "install smoke should support both Windows installers");
 assert.match(imeInstallSmoke, /Join-ProcessArguments/, "install smoke should quote process arguments before Start-Process");
 assert.match(imeInstallSmoke, /\$commandLine = Join-ProcessArguments \$ArgumentList/, "install smoke should build a single quoted command line");
 assert.match(imeInstallSmoke, /Start-Process -FilePath \$FilePath -ArgumentList \$commandLine/, "install smoke should pass a single quoted command line to Start-Process");
-assert.match(imeInstallSmoke, /OpenLessImeSubmit/, "install smoke should preserve TSF backend context");
-assert.match(imeInstallSmoke, /Software\\Classes\\CLSID\\\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D\}\\InprocServer32/, "install smoke should check x64 COM registration");
-assert.match(imeInstallSmoke, /Software\\WOW6432Node\\Classes\\CLSID\\\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D\}\\InprocServer32/, "install smoke should check x86 COM registration");
-assert.match(imeInstallSmoke, /LanguageProfile\\0x00000804\\\{9B5F5E04-23F6-47DA-9A26-D221F6C3F02E\}/, "install smoke should check the TSF language profile");
-assert.match(imeInstallSmoke, /Category\\Category\\\{34745C63-B2F0-4784-8B67-5E12C8701A31\}/, "install smoke should check the keyboard TSF category");
+assert.match(imeInstallSmoke, /OpenLessUnboundImeSubmit/, "install smoke should preserve TSF backend context");
+assert.match(imeInstallSmoke, /\$TextServiceClsid = "\{C5EA393C-5644-490A-A3F1-6828430E9BC6\}"/, "install smoke should use the OpenLess Unbound TSF CLSID");
+assert.match(imeInstallSmoke, /\$ProfileGuid = "\{A3A75150-B165-4F0A-A2AB-B1E59D76A5F8\}"/, "install smoke should use the OpenLess Unbound TSF profile GUID");
+assert.match(imeInstallSmoke, /Software\\Classes\\CLSID\\\$TextServiceClsid\\InprocServer32/, "install smoke should check x64 COM registration");
+assert.match(imeInstallSmoke, /Software\\WOW6432Node\\Classes\\CLSID\\\$TextServiceClsid\\InprocServer32/, "install smoke should check x86 COM registration");
+assert.match(imeInstallSmoke, /LanguageProfile\\\$LangId\\\$ProfileGuid/, "install smoke should check the TSF language profile");
+assert.match(imeInstallSmoke, /\$KeyboardCategoryGuid = "\{34745C63-B2F0-4784-8B67-5E12C8701A31\}"/, "install smoke should define the keyboard TSF category");
+assert.match(imeInstallSmoke, /Category\\Category\\\$KeyboardCategoryGuid\\\$TextServiceClsid/, "install smoke should check the keyboard TSF category");
 assert.match(imeInstallSmoke, /foreach \(\$key in \$ExpectedBackendKeys\) \{[\s\S]*Assert-RegistryKey -View Registry64 -SubKey \$key[\s\S]*\}/, "install smoke should assert every backend-required registry key exists");
 assert.doesNotMatch(imeInstallSmoke, /foreach \(\$key in \$ExpectedBackendKeys\) \{[\s\S]*Write-Host "\[trace\] backend-required key: HKLM\\\$key"[\s\S]*\}/, "install smoke must not only trace backend-required registry keys");
 assert.match(ciWorkflow, /windows-ime-install-smoke\.ps1[\s\S]*-InstallerKind nsis/, "CI should install and verify the NSIS artifact");

@@ -12,10 +12,11 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getSettings, isTauri, qaWindowDismiss, qaWindowPin } from '../lib/ipc';
+import { getSettings, isTauri, qaRecordToggle, qaWindowDismiss, qaWindowPin } from '../lib/ipc';
 import type { QaChatMessage, QaStatePayload, UserPreferences } from '../lib/types';
-import { getHotkeyBindingLabel } from '../lib/hotkey';
+import { formatComboLabel } from '../lib/hotkey';
 import { renderQaMarkdown, renderQaPlainText } from '../lib/qaMarkdown';
+import { Icon } from '../components/Icon';
 
 const SELECTION_PREVIEW_MAX = 60;
 
@@ -121,7 +122,11 @@ export function QaPanel() {
         // webview，没有 HotkeySettingsContext；如果用户在主窗口改了录音键，
         // 浮窗里的 "{recordHotkey}" 文案必须立刻跟上，否则会一直停在旧值。
         const prefsHandle = await listen<UserPreferences>('prefs:changed', event => {
-          setRecordHotkeyLabel(getHotkeyBindingLabel(event.payload?.hotkey));
+          setRecordHotkeyLabel(
+            event.payload?.dictationHotkey
+              ? formatComboLabel(event.payload.dictationHotkey)
+              : i18n.t('hotkey.fallback'),
+          );
         });
         if (cancelled) {
           stateHandle();
@@ -153,6 +158,14 @@ export function QaPanel() {
       if (event.key === 'Escape') {
         event.preventDefault();
         void qaWindowDismiss();
+        return;
+      }
+      const isRightCtrl =
+        event.code === 'ControlRight' ||
+        (event.key === 'Control' && event.location === KeyboardEvent.DOM_KEY_LOCATION_RIGHT);
+      if (isRightCtrl && !event.repeat) {
+        event.preventDefault();
+        void qaRecordToggle();
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -172,7 +185,7 @@ export function QaPanel() {
     void getSettings()
       .then(prefs => {
         if (cancelled) return;
-        setRecordHotkeyLabel(getHotkeyBindingLabel(prefs.hotkey));
+        setRecordHotkeyLabel(formatComboLabel(prefs.dictationHotkey));
       })
       .catch(err => {
         console.warn('[QaPanel] load hotkey label failed', err);
@@ -399,6 +412,8 @@ function MessageList({ messages }: { messages: QaChatMessage[] }) {
 }
 
 function MessageRow({ message }: { message: QaChatMessage }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
   // 钩子顺序与 message.role 无关：先无条件 useMemo（user 消息时 html 不渲染但计算无害）。
   const html = useMemo(() => {
     if (message.role !== 'assistant') return '';
@@ -409,6 +424,18 @@ function MessageRow({ message }: { message: QaChatMessage }) {
       return renderQaPlainText(String(message.content ?? ''));
     }
   }, [message.content, message.role]);
+
+  const copyAssistantMessage = async () => {
+    if (message.role !== 'assistant' || !message.content.trim()) return;
+    if (!navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch (error) {
+      console.error('[qa] failed to copy answer', error);
+    }
+  };
 
   if (message.role === 'user') {
     // 第一轮可能含 "# 选区原文 ... # 我的问题 ..." → 抽出问题部分单独显示，
@@ -428,12 +455,23 @@ function MessageRow({ message }: { message: QaChatMessage }) {
     );
   }
   return (
-    <div
-      className="qa-answer"
-      style={assistantBubbleStyle}
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div style={assistantMessageShellStyle}>
+      <div
+        className="qa-answer"
+        style={assistantBubbleWithCopyStyle}
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      <button
+        type="button"
+        onClick={() => void copyAssistantMessage()}
+        title={copied ? t('common.copied') : t('common.copy')}
+        aria-label={copied ? t('common.copied') : t('common.copy')}
+        style={assistantCopyButtonStyle}
+      >
+        <Icon name={copied ? 'check' : 'copy'} size={12} />
+      </button>
+    </div>
   );
 }
 
@@ -703,6 +741,7 @@ const userBubbleStyle: CSSProperties = {
   fontSize: 13,
   lineHeight: 1.55,
   wordBreak: 'break-word',
+  userSelect: 'text',
 };
 
 const selectionQuoteStyle: CSSProperties = {
@@ -728,6 +767,37 @@ const assistantBubbleStyle: CSSProperties = {
   color: 'var(--ol-ink)',
   wordBreak: 'break-word',
   alignSelf: 'flex-start',
+  userSelect: 'text',
+};
+
+const assistantMessageShellStyle: CSSProperties = {
+  position: 'relative',
+  alignSelf: 'flex-start',
+  maxWidth: '92%',
+};
+
+const assistantBubbleWithCopyStyle: CSSProperties = {
+  ...assistantBubbleStyle,
+  maxWidth: '100%',
+  paddingRight: 36,
+};
+
+const assistantCopyButtonStyle: CSSProperties = {
+  position: 'absolute',
+  top: 6,
+  right: 6,
+  width: 24,
+  height: 24,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  border: '0.5px solid var(--ol-line)',
+  borderRadius: 8,
+  background: 'rgba(255,255,255,0.72)',
+  color: 'var(--ol-ink-3)',
+  cursor: 'pointer',
+  padding: 0,
+  fontFamily: 'inherit',
 };
 
 const errorRowStyle: CSSProperties = {

@@ -7,7 +7,7 @@
 
 namespace {
 
-constexpr wchar_t kPipeNamePrefix[] = L"\\\\.\\pipe\\OpenLessImeSubmit";
+constexpr wchar_t kPipeNamePrefix[] = L"\\\\.\\pipe\\OpenLessUnboundImeSubmit";
 constexpr DWORD kPipeBufferSize = 4096;
 constexpr size_t kMaxJsonLineBytes = 64 * 1024;
 

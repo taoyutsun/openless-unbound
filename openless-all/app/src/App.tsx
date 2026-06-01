@@ -214,7 +214,7 @@ function StartupShell() {
         }}
       >
         <img src="AppIcon.png" alt="" style={{ width: 18, height: 18, borderRadius: 4 }} />
-        <span>OpenLess 正在启动</span>
+        <span>OpenLess Unbound 正在启动</span>
       </div>
     </div>
   );

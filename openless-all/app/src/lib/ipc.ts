@@ -93,6 +93,9 @@ let mockSettings: UserPreferences = {
     chineseScriptPreference: "auto",
     outputLanguagePreference: "auto",
     qaSaveHistory: false,
+    qaLlmProvider: null,
+    qaLlmModel: null,
+    qaLlmThinkingEnabled: null,
     customComboHotkey: null,
     translationHotkey: { primary: "Shift", modifiers: [] },
     switchStyleHotkey: {
@@ -1068,6 +1071,10 @@ export function qaWindowDismiss(): Promise<void> {
 
 export function qaWindowPin(pinned: boolean): Promise<void> {
     return invokeOrMock("qa_window_pin", { pinned }, () => undefined)
+}
+
+export function qaRecordToggle(): Promise<void> {
+    return invokeOrMock("qa_record_toggle", undefined, () => undefined)
 }
 
 // ── Combo Hotkey (自定义录音组合键) ───────────────────────────────────

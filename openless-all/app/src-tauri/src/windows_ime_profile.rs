@@ -1,6 +1,7 @@
-pub const OPENLESS_TSF_LANG_ID: u16 = 0x0804;
-pub const OPENLESS_TEXT_SERVICE_CLSID_BRACED: &str = "{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}";
-pub const OPENLESS_PROFILE_GUID_BRACED: &str = "{9B5F5E04-23F6-47DA-9A26-D221F6C3F02E}";
+pub const OPENLESS_TSF_LANG_ID: u16 = 0x0404;
+pub const OPENLESS_TEXT_SERVICE_CLSID_BRACED: &str =
+    "{C5EA393C-5644-490A-A3F1-6828430E9BC6}";
+pub const OPENLESS_PROFILE_GUID_BRACED: &str = "{A3A75150-B165-4F0A-A2AB-B1E59D76A5F8}";
 
 use crate::types::{WindowsImeInstallState, WindowsImeStatus};
 
@@ -202,11 +203,11 @@ mod windows_impl {
     use winreg::RegKey;
 
     const OPENLESS_COM_INPROC_KEY: &str =
-        r"Software\Classes\CLSID\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\InprocServer32";
-    const OPENLESS_TSF_PROFILE_KEY: &str = r"Software\Microsoft\CTF\TIP\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\LanguageProfile\0x00000804\{9B5F5E04-23F6-47DA-9A26-D221F6C3F02E}";
-    const OPENLESS_TSF_KEYBOARD_CATEGORY_KEY: &str = r"Software\Microsoft\CTF\TIP\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\Category\Category\{34745C63-B2F0-4784-8B67-5E12C8701A31}\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}";
-    const OPENLESS_TSF_IMMERSIVE_CATEGORY_KEY: &str = r"Software\Microsoft\CTF\TIP\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\Category\Category\{13A016DF-560B-46CD-947A-4C3AF1E0E35D}\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}";
-    const OPENLESS_TSF_SYSTRAY_CATEGORY_KEY: &str = r"Software\Microsoft\CTF\TIP\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\Category\Category\{25504FB4-7BAB-4BC1-9C69-CF81890F0EF5}\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}";
+        r"Software\Classes\CLSID\{C5EA393C-5644-490A-A3F1-6828430E9BC6}\InprocServer32";
+    const OPENLESS_TSF_PROFILE_KEY: &str = r"Software\Microsoft\CTF\TIP\{C5EA393C-5644-490A-A3F1-6828430E9BC6}\LanguageProfile\0x00000404\{A3A75150-B165-4F0A-A2AB-B1E59D76A5F8}";
+    const OPENLESS_TSF_KEYBOARD_CATEGORY_KEY: &str = r"Software\Microsoft\CTF\TIP\{C5EA393C-5644-490A-A3F1-6828430E9BC6}\Category\Category\{34745C63-B2F0-4784-8B67-5E12C8701A31}\{C5EA393C-5644-490A-A3F1-6828430E9BC6}";
+    const OPENLESS_TSF_IMMERSIVE_CATEGORY_KEY: &str = r"Software\Microsoft\CTF\TIP\{C5EA393C-5644-490A-A3F1-6828430E9BC6}\Category\Category\{13A016DF-560B-46CD-947A-4C3AF1E0E35D}\{C5EA393C-5644-490A-A3F1-6828430E9BC6}";
+    const OPENLESS_TSF_SYSTRAY_CATEGORY_KEY: &str = r"Software\Microsoft\CTF\TIP\{C5EA393C-5644-490A-A3F1-6828430E9BC6}\Category\Category\{25504FB4-7BAB-4BC1-9C69-CF81890F0EF5}\{C5EA393C-5644-490A-A3F1-6828430E9BC6}";
     const OPENLESS_PROFILE_ACTIVATION_FLAGS: u32 =
         TF_IPPMF_FORSESSION | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE | TF_IPPMF_ENABLEPROFILE;
     const PROFILE_RESTORE_FLAGS: u32 = TF_IPPMF_FORSESSION | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE;
@@ -407,13 +408,13 @@ mod windows_impl {
             RegistrationInspection::Installed { dll_path } => WindowsImeStatus {
                 state: WindowsImeInstallState::Installed,
                 using_tsf_backend: true,
-                message: "OpenLess TSF IME registration is present".to_string(),
+                message: "OpenLess Unbound TSF IME registration is present".to_string(),
                 dll_path: Some(dll_path),
             },
             RegistrationInspection::NotInstalled => WindowsImeStatus {
                 state: WindowsImeInstallState::NotInstalled,
                 using_tsf_backend: false,
-                message: "OpenLess TSF IME registration was not found".to_string(),
+                message: "OpenLess Unbound TSF IME registration was not found".to_string(),
                 dll_path: None,
             },
             RegistrationInspection::Broken { dll_path, reason } => WindowsImeStatus {
@@ -471,7 +472,7 @@ mod windows_impl {
             Err(_) => {
                 return RegistrationInspection::Broken {
                     dll_path: None,
-                    reason: "OpenLess COM registration is missing".to_string(),
+                    reason: "OpenLess Unbound COM registration is missing".to_string(),
                 };
             }
         };
@@ -481,7 +482,7 @@ mod windows_impl {
             _ => {
                 return RegistrationInspection::Broken {
                     dll_path: None,
-                    reason: "OpenLess COM DLL path is missing".to_string(),
+                    reason: "OpenLess Unbound COM DLL path is missing".to_string(),
                 };
             }
         };
@@ -489,7 +490,7 @@ mod windows_impl {
         if !Path::new(&dll_path).is_file() {
             return RegistrationInspection::Broken {
                 dll_path: Some(dll_path),
-                reason: "OpenLess COM DLL path does not exist".to_string(),
+                reason: "OpenLess Unbound COM DLL path does not exist".to_string(),
             };
         }
 
@@ -505,28 +506,30 @@ mod windows_impl {
         if !Path::new(&x86_dll_path).is_file() {
             return RegistrationInspection::Broken {
                 dll_path: Some(x86_dll_path),
-                reason: "OpenLess 32-bit COM DLL path does not exist".to_string(),
+                reason: "OpenLess Unbound 32-bit COM DLL path does not exist".to_string(),
             };
         }
 
         if !tip_key_exists {
             return RegistrationInspection::Broken {
                 dll_path: Some(dll_path),
-                reason: "OpenLess TSF language profile registration is missing".to_string(),
+                reason: "OpenLess Unbound TSF language profile registration is missing"
+                    .to_string(),
             };
         }
 
         if !keyboard_category_exists {
             return RegistrationInspection::Broken {
                 dll_path: Some(dll_path),
-                reason: "OpenLess TSF keyboard category registration is missing".to_string(),
+                reason: "OpenLess Unbound TSF keyboard category registration is missing"
+                    .to_string(),
             };
         }
 
         if !immersive_category_exists || !systray_category_exists {
             return RegistrationInspection::Broken {
                 dll_path: Some(dll_path),
-                reason: "OpenLess TSF immersive support registration is missing; reinstall the IME"
+                reason: "OpenLess Unbound TSF immersive support registration is missing; reinstall the IME"
                     .to_string(),
             };
         }
@@ -537,10 +540,10 @@ mod windows_impl {
     fn read_com_dll_path(hklm: &RegKey, flags: u32, label: &str) -> Result<String, String> {
         let com_key = hklm
             .open_subkey_with_flags(OPENLESS_COM_INPROC_KEY, flags)
-            .map_err(|_| format!("OpenLess {label} COM registration is missing"))?;
+            .map_err(|_| format!("OpenLess Unbound {label} COM registration is missing"))?;
         match com_key.get_value::<String, _>("") {
             Ok(value) if !value.trim().is_empty() => Ok(value),
-            _ => Err(format!("OpenLess {label} COM DLL path is missing")),
+            _ => Err(format!("OpenLess Unbound {label} COM DLL path is missing")),
         }
     }
 
@@ -626,7 +629,7 @@ mod tests {
 
     fn text_service_snapshot() -> ImeProfileSnapshot {
         ImeProfileSnapshot::text_service(
-            0x0804,
+            0x0404,
             "{11111111-1111-1111-1111-111111111111}".to_string(),
             "{22222222-2222-2222-2222-222222222222}".to_string(),
         )
@@ -637,7 +640,7 @@ mod tests {
         let snapshot = text_service_snapshot();
 
         assert_eq!(snapshot.kind(), &ImeProfileKind::TextService);
-        assert_eq!(snapshot.lang_id(), 0x0804);
+        assert_eq!(snapshot.lang_id(), 0x0404);
         assert_eq!(
             snapshot.clsid(),
             Some("{11111111-1111-1111-1111-111111111111}")
@@ -704,14 +707,14 @@ mod windows_tests {
 
     #[test]
     fn openless_profile_identifiers_are_fixed() {
-        assert_eq!(OPENLESS_TSF_LANG_ID, 0x0804);
+        assert_eq!(OPENLESS_TSF_LANG_ID, 0x0404);
         assert_eq!(
             OPENLESS_TEXT_SERVICE_CLSID_BRACED,
-            "{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}"
+            "{C5EA393C-5644-490A-A3F1-6828430E9BC6}"
         );
         assert_eq!(
             OPENLESS_PROFILE_GUID_BRACED,
-            "{9B5F5E04-23F6-47DA-9A26-D221F6C3F02E}"
+            "{A3A75150-B165-4F0A-A2AB-B1E59D76A5F8}"
         );
     }
 
@@ -748,10 +751,10 @@ mod windows_tests {
 
     #[test]
     fn guid_snapshot_strings_are_canonical_and_parseable() {
-        let guid = windows::core::GUID::from_u128(0x6b9f3f4f_5ee7_42d6_9c61_9f80b03a5d7d);
+        let guid = windows::core::GUID::from_u128(0xc5ea393c_5644_490a_a3f1_6828430e9bc6);
         let formatted = windows_impl::guid_to_braced_string(guid);
 
-        assert_eq!(formatted, "{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}");
+        assert_eq!(formatted, "{C5EA393C-5644-490A-A3F1-6828430E9BC6}");
         assert!(parse_guid(&formatted).is_ok());
     }
 

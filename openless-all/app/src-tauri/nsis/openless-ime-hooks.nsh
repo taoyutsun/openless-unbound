@@ -1,13 +1,13 @@
 !macro OPENLESS_IME_ABORT_IF_FAILED EXIT_CODE LABEL
   ${If} ${EXIT_CODE} != 0
-    DetailPrint "OpenLess TSF IME ${LABEL} failed with exit code ${EXIT_CODE}"
+    DetailPrint "OpenLess Unbound TSF IME ${LABEL} failed with exit code ${EXIT_CODE}"
     Abort
   ${EndIf}
 !macroend
 
 !macro OPENLESS_IME_REGISTER_X64
   ${If} ${RunningX64}
-    DetailPrint "Registering OpenLess x64 TSF IME"
+    DetailPrint "Registering OpenLess Unbound x64 TSF IME"
     ExecWait '"$WINDIR\Sysnative\regsvr32.exe" /s "$INSTDIR\windows-ime\x64\OpenLessIme.dll"' $0
     ${If} $0 != 0
       ${DisableX64FSRedirection}
@@ -20,29 +20,29 @@
 
 !macro OPENLESS_IME_UNREGISTER_X64
   ${If} ${RunningX64}
-    DetailPrint "Unregistering OpenLess x64 TSF IME"
+    DetailPrint "Unregistering OpenLess Unbound x64 TSF IME"
     ExecWait '"$WINDIR\Sysnative\regsvr32.exe" /s /u "$INSTDIR\windows-ime\x64\OpenLessIme.dll"' $0
     ${If} $0 != 0
       ${DisableX64FSRedirection}
       ExecWait '"$WINDIR\System32\regsvr32.exe" /s /u "$INSTDIR\windows-ime\x64\OpenLessIme.dll"' $0
       ${EnableX64FSRedirection}
     ${EndIf}
-    DetailPrint "OpenLess x64 TSF IME unregister exit code $0"
+    DetailPrint "OpenLess Unbound x64 TSF IME unregister exit code $0"
   ${EndIf}
 !macroend
 
 !macro OPENLESS_IME_UNREGISTER_X86
-  DetailPrint "Unregistering OpenLess x86 TSF IME"
+  DetailPrint "Unregistering OpenLess Unbound x86 TSF IME"
   ${If} ${RunningX64}
     ExecWait '"$WINDIR\SysWOW64\regsvr32.exe" /s /u "$INSTDIR\windows-ime\x86\OpenLessIme.dll"' $0
   ${Else}
     ExecWait '"$WINDIR\System32\regsvr32.exe" /s /u "$INSTDIR\windows-ime\x86\OpenLessIme.dll"' $0
   ${EndIf}
-  DetailPrint "OpenLess x86 TSF IME unregister exit code $0"
+  DetailPrint "OpenLess Unbound x86 TSF IME unregister exit code $0"
 !macroend
 
 !macro OPENLESS_IME_REGISTER_X86
-  DetailPrint "Registering OpenLess x86 TSF IME"
+  DetailPrint "Registering OpenLess Unbound x86 TSF IME"
   ${If} ${RunningX64}
     ExecWait '"$WINDIR\SysWOW64\regsvr32.exe" /s "$INSTDIR\windows-ime\x86\OpenLessIme.dll"' $0
   ${Else}

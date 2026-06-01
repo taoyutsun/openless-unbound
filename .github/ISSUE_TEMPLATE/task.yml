@@ -1,60 +1,34 @@
-name: 任务 / 治理项
-description: 按 OpenLess 当前 issue 口径记录文档、治理、验证或工具任务。
+name: 功能 / 維護任務
+description: 提出 OpenLess Unbound 的功能、文件、維護或驗證任務。
 title: "[area] "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        所有人类可读内容必须使用中文。一个 issue 只描述一个可独立交付目标。
-
-        标题硬约束：
-        - 使用中文短句，推荐格式：`[area] 目标`
-        - 示例：`[infra/devex] 补齐 Windows 构建前置检查`、`[tauri] 补充跨平台打包说明`
-        - 不使用 fork-only 状态前缀，例如 `status/ready`、`agent/*`、`scope/*`
-
-        Labels 硬约束：
-        - 必须恰好选择 1 个类型：`enhancement` / `documentation`
-        - 如果仓库已配置优先级标签，必须恰好选择 1 个优先级：`critical` / `high` / `medium` / `low`
-        - 如果仓库已配置范围标签，必须至少选择 1 个范围：`area:*`
-        - 可选：`needs-split`
-        - 不要把 `status/*`、`kind/*`、`agent/*`、`scope/*` 用到 upstream 或 upstream-ready issue 上。
+        請盡量使用繁體中文描述。若提案牽涉上游 OpenLess 行為，請說明是否希望維持相容。
   - type: textarea
-    id: symptom
+    id: goal
     attributes:
-      label: 现象
-      description: 说明为什么需要这个任务、现有流程哪里不足、有哪些证据。
+      label: 目標
+      description: 說明希望改善什麼限制或新增什麼能力。
       placeholder: |
-        ## 现象
-
-        -
-    validations:
-      required: true
-  - type: textarea
-    id: impact
-    attributes:
-      label: 影响
-      description: 说明不做会影响什么交付、验证、治理或维护流程。
-      placeholder: |
-        ## 影响
-
-        -
+        - 目前限制：
+        - 希望達成：
     validations:
       required: true
   - type: textarea
     id: acceptance
     attributes:
-      label: 建议接受标准
-      description: 写成可验证的完成条件；不确定项写 TODO，不编造。
+      label: 驗收方式
+      description: 寫下完成後可以如何確認。
       placeholder: |
-        ## 建议接受标准
-
         - [ ]
         - [ ]
     validations:
       required: true
   - type: textarea
-    id: todo
+    id: notes
     attributes:
-      label: TODO / 不确定项
-      description: 只写尚未确认但必须保留的问题，不要补不存在的事实。
+      label: 補充說明
+      description: 可補充設計考量、截圖、相關 issue 或測試方式。

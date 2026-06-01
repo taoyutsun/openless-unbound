@@ -1,5 +1,5 @@
-// History.tsx — 接 Tauri 后端 list_history / delete_history_entry / clear_history。
-// 真实数据来自 ~/Library/Application Support/OpenLess/history.json。
+﻿// History.tsx — 接 Tauri 后端 list_history / delete_history_entry / clear_history。
+// 真实数据来自 ~/Library/Application Support/OpenLess Unbound/history.json。
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';

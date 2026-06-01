@@ -66,7 +66,7 @@ function Get-IntermediateDirectory {
 }
 
 if (-not (Test-IsAdministrator)) {
-  throw "Registering the OpenLess TSF IME requires an elevated Administrator PowerShell."
+  throw "Registering the OpenLess Unbound TSF IME requires an elevated Administrator PowerShell."
 }
 
 foreach ($platform in @("x64", "Win32")) {
@@ -84,5 +84,5 @@ foreach ($platform in @("x64", "Win32")) {
   }
   $registeredDlls[$platform] = $dll
   Save-RegistrationManifest
-  Write-Host "[ok] OpenLess TSF IME registered ($platform)"
+  Write-Host "[ok] OpenLess Unbound TSF IME registered ($platform)"
 }

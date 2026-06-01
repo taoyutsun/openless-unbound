@@ -247,6 +247,9 @@ export interface UserPreferences {
   qaHotkey: QaHotkeyBinding | null;
   /** 是否把 Q&A 历史写到本地存档。详见 issue #118。 */
   qaSaveHistory: boolean;
+  qaLlmProvider: string | null;
+  qaLlmModel: string | null;
+  qaLlmThinkingEnabled: boolean | null;
   /** 自定义录音组合键。当 hotkey.trigger == 'custom' 时使用。null = 未设置。 */
   customComboHotkey: ComboBinding | null;
   /** 录音中触发翻译的全局快捷键。默认 Shift。 */

@@ -10,6 +10,7 @@ import { Row } from '../../components/ui/Row';
 import { openExternal } from '../../lib/ipc';
 import { APP_VERSION_LABEL } from '../../lib/appVersion';
 import { readFontScale, setFontScale, type FontScaleId } from '../../lib/fontScale';
+import { OPENLESS_UNBOUND_AUTHOR, OPENLESS_UNBOUND_LINKS, UPSTREAM_OPENLESS_LINKS } from '../../lib/aboutLinks';
 import { Card } from '../_atoms';
 import { SectionTitle } from './shared';
 import { CheckUpdateButton } from './CheckUpdateButton';
@@ -24,7 +25,7 @@ export function AboutSection() {
   }, []);
 
   const copyQq = () => {
-    navigator.clipboard?.writeText('1078960553');
+    navigator.clipboard?.writeText(UPSTREAM_OPENLESS_LINKS.qqGroup);
     setQqCopied(true);
     if (qqCopiedRef.current) clearTimeout(qqCopiedRef.current);
     qqCopiedRef.current = window.setTimeout(() => setQqCopied(false), 1500);
@@ -41,7 +42,7 @@ export function AboutSection() {
             style={{ width: 56, height: 56, borderRadius: 13, boxShadow: '0 4px 10px rgba(0,0,0,.10), 0 0 0 0.5px rgba(0,0,0,.06)' }}
           />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 17, fontWeight: 600 }}>OpenLess</div>
+            <div style={{ fontSize: 17, fontWeight: 600 }}>OpenLess Unbound</div>
             <div style={{ fontSize: 12, color: 'var(--ol-ink-3)', marginTop: 2 }}>
               {t('modal.about.tagline')} · {APP_VERSION_LABEL}
             </div>
@@ -61,17 +62,17 @@ export function AboutSection() {
       <Card>
         <SectionTitle>{t('settings.about.linksTitle')}</SectionTitle>
         <Row label={t('modal.about.source')}>
-          <button style={btnGhost} onClick={() => openExternal('https://github.com/appergb/openless')}>
+          <button style={btnGhost} onClick={() => openExternal(UPSTREAM_OPENLESS_LINKS.source)}>
             GitHub
           </button>
         </Row>
         <Row label={t('modal.about.docs')}>
-          <button style={btnGhost} onClick={() => openExternal('https://github.com/appergb/openless#readme')}>
+          <button style={btnGhost} onClick={() => openExternal(UPSTREAM_OPENLESS_LINKS.docs)}>
             {t('modal.about.docsBtn')}
           </button>
         </Row>
         <Row label={t('modal.about.feedback')}>
-          <button style={btnGhost} onClick={() => openExternal('https://github.com/appergb/openless/issues')}>
+          <button style={btnGhost} onClick={() => openExternal(UPSTREAM_OPENLESS_LINKS.issues)}>
             {t('modal.about.feedbackBtn')}
           </button>
         </Row>
@@ -83,12 +84,42 @@ export function AboutSection() {
               border: '0.5px solid var(--ol-line-strong)',
               boxShadow: '0 1px 0 rgba(0,0,0,0.04)',
               color: 'var(--ol-ink-2)',
-            }}>1078960553</kbd>
+            }}>{UPSTREAM_OPENLESS_LINKS.qqGroup}</kbd>
             <button onClick={copyQq} title={t('modal.about.copyQq')} style={btnGhost}>
               <Icon name="copy" size={14} />
             </button>
             {qqCopied && <span style={{ fontSize: 11, color: 'var(--ol-ok)', whiteSpace: 'nowrap' }}>{t('common.copied')}</span>}
           </div>
+        </Row>
+      </Card>
+
+      <Card>
+        <SectionTitle>{t('settings.about.authorTitle')}</SectionTitle>
+        <p style={descStyle}>
+          {t('settings.about.authorDesc', { author: OPENLESS_UNBOUND_AUTHOR.name })}
+        </p>
+        <Row label={t('settings.about.authorName')}>
+          <span style={valueTextStyle}>{OPENLESS_UNBOUND_AUTHOR.name}</span>
+        </Row>
+        <Row label={OPENLESS_UNBOUND_AUTHOR.blogLabel}>
+          <button style={btnGhost} onClick={() => openExternal(OPENLESS_UNBOUND_AUTHOR.blogUrl)}>
+            taoyutsun.blogspot.com ↗
+          </button>
+        </Row>
+        <Row label={OPENLESS_UNBOUND_AUTHOR.facebookLabel}>
+          <button style={btnGhost} onClick={() => openExternal(OPENLESS_UNBOUND_AUTHOR.facebookUrl)}>
+            facebook.com/arthurtaoyutsun ↗
+          </button>
+        </Row>
+        <Row label={t('settings.about.projectSource')}>
+          <button style={btnGhost} onClick={() => openExternal(OPENLESS_UNBOUND_LINKS.source)}>
+            {t('settings.about.projectSourceBtn')}
+          </button>
+        </Row>
+        <Row label={t('settings.about.upstreamSource')}>
+          <button style={btnGhost} onClick={() => openExternal(UPSTREAM_OPENLESS_LINKS.source)}>
+            {t('settings.about.upstreamSourceBtn')}
+          </button>
         </Row>
       </Card>
     </>
@@ -148,4 +179,17 @@ const btnGhost: CSSProperties = {
   background: '#fff', color: 'var(--ol-ink-2)',
   cursor: 'default', fontFamily: 'inherit',
   transition: 'background 0.16s var(--ol-motion-quick), border-color 0.16s var(--ol-motion-quick)',
+};
+
+const descStyle: CSSProperties = {
+  margin: '6px 0 12px',
+  color: 'var(--ol-ink-3)',
+  fontSize: 12,
+  lineHeight: 1.7,
+};
+
+const valueTextStyle: CSSProperties = {
+  color: 'var(--ol-ink-2)',
+  fontSize: 13,
+  fontWeight: 500,
 };

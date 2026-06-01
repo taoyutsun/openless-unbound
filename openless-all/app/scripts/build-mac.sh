@@ -12,7 +12,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APP="src-tauri/target/release/bundle/macos/OpenLess.app"
+APP="src-tauri/target/release/bundle/macos/OpenLess Unbound.app"
 INFO="$APP/Contents/Info.plist"
 DMG_DIR="src-tauri/target/release/bundle/dmg"
 INSTALL="${INSTALL:-1}"
@@ -56,15 +56,15 @@ done < <(find "$DMG_DIR" -maxdepth 1 -name '*.dmg' -print)
 
 if [ "$INSTALL" = "1" ]; then
   echo "▶ 装到 /Applications"
-  pkill -f "OpenLess.app/Contents/MacOS/openless" 2>/dev/null || true
+  pkill -f "OpenLess Unbound.app/Contents/MacOS/openless" 2>/dev/null || true
   sleep 1
   # 每次重装前重置 TCC：ad-hoc 签名 hash 每次构建都会变，旧授权立即失效，
   # 不重置就会出现"系统设置里看着已勾选实际不生效"。
-  tccutil reset Accessibility com.openless.app 2>/dev/null || true
-  tccutil reset Microphone com.openless.app 2>/dev/null || true
-  rm -rf /Applications/OpenLess.app
+  tccutil reset Accessibility com.openless.unbound 2>/dev/null || true
+  tccutil reset Microphone com.openless.unbound 2>/dev/null || true
+  rm -rf "/Applications/OpenLess Unbound.app"
   cp -R "$APP" /Applications/
-  xattr -dr com.apple.quarantine /Applications/OpenLess.app 2>/dev/null || true
-  echo "✓ 装好了：/Applications/OpenLess.app"
-  echo "  打开方式：open /Applications/OpenLess.app"
+  xattr -dr com.apple.quarantine "/Applications/OpenLess Unbound.app" 2>/dev/null || true
+  echo "✓ 装好了：/Applications/OpenLess Unbound.app"
+  echo "  打开方式：open '/Applications/OpenLess Unbound.app'"
 fi

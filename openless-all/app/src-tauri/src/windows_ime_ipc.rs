@@ -37,8 +37,8 @@ impl std::fmt::Display for WindowsImeIpcError {
             Self::Unavailable(message) | Self::Protocol(message) | Self::Io(message) => {
                 write!(f, "{message}")
             }
-            Self::NoReadyClient => write!(f, "no OpenLess IME client is ready"),
-            Self::Timeout => write!(f, "OpenLess IME IPC timed out"),
+            Self::NoReadyClient => write!(f, "no OpenLess Unbound IME client is ready"),
+            Self::Timeout => write!(f, "OpenLess Unbound IME IPC timed out"),
         }
     }
 }
@@ -153,7 +153,7 @@ impl WindowsImeIpcServer {
             let _ = self;
             let _ = request;
             Err(WindowsImeIpcError::Unavailable(
-                "OpenLess IME IPC is only available on Windows".to_string(),
+                "OpenLess Unbound IME IPC is only available on Windows".to_string(),
             ))
         }
     }

@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$ExePath = "",
   [int]$TimeoutSeconds = 30,
   [int]$VirtualKey = 0xA3
@@ -244,8 +244,8 @@ function Invoke-HotkeyAttempt($ExpectedPattern, $UnexpectedPattern, $Label) {
   }
 }
 
-$logPath = Join-Path $env:LOCALAPPDATA "OpenLess\Logs\openless.log"
-$preferencesPath = Join-Path $env:APPDATA "OpenLess\preferences.json"
+$logPath = Join-Path $env:LOCALAPPDATA "OpenLess Unbound\Logs\openless.log"
+$preferencesPath = Join-Path $env:APPDATA "OpenLess Unbound\preferences.json"
 $previousPreferences = Set-HoldHotkeyPreference $preferencesPath
 
 $globalMicPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone"

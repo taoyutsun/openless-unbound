@@ -67,7 +67,9 @@ use dictation::{
     begin_session, cancel_session, end_session, handle_pressed, handle_pressed_edge,
     handle_released, handle_released_edge, request_stop_during_starting,
 };
-use qa::{close_qa_panel, handle_qa_hotkey_pressed, QaPhase, QaSessionState};
+use qa::{
+    close_qa_panel, handle_qa_hotkey_pressed, handle_qa_option_edge, QaPhase, QaSessionState,
+};
 #[cfg(test)]
 use resources::discard_startup_resources_for_session;
 use resources::{
@@ -150,6 +152,48 @@ enum ActiveAsr {
     Local(Arc<crate::asr::local::LocalQwenAsr>),
 }
 
+impl ActiveAsr {
+    fn cancel(&self) {
+        match self {
+            ActiveAsr::Volcengine(asr) => asr.cancel(),
+            ActiveAsr::Whisper(asr) => asr.cancel(),
+            ActiveAsr::Bailian(asr) => asr.cancel(),
+            #[cfg(target_os = "windows")]
+            ActiveAsr::FoundryLocalWhisper(asr) => asr.cancel(),
+            #[cfg(target_os = "windows")]
+            ActiveAsr::SherpaOnnxLocal(asr) => asr.cancel(),
+            #[cfg(target_os = "macos")]
+            ActiveAsr::Local(asr) => asr.cancel(),
+        }
+    }
+
+    async fn send_last_frame(&self) -> anyhow::Result<()> {
+        match self {
+            ActiveAsr::Volcengine(asr) => Ok(asr.send_last_frame().await?),
+            ActiveAsr::Bailian(asr) => Ok(asr.send_last_frame().await?),
+            _ => Ok(()),
+        }
+    }
+
+    async fn await_final_result(&self) -> anyhow::Result<RawTranscript> {
+        match self {
+            ActiveAsr::Volcengine(asr) => Ok(asr.await_final_result().await?),
+            ActiveAsr::Whisper(asr) => Ok(asr.transcribe().await?),
+            ActiveAsr::Bailian(asr) => Ok(asr.await_final_result().await?),
+            #[cfg(target_os = "windows")]
+            ActiveAsr::FoundryLocalWhisper(asr) => Ok(asr
+                .transcribe(foundry_audio_transcribe_timeout_duration())
+                .await?),
+            #[cfg(target_os = "windows")]
+            ActiveAsr::SherpaOnnxLocal(asr) => Ok(asr
+                .transcribe(sherpa_audio_transcribe_timeout_duration())
+                .await?),
+            #[cfg(target_os = "macos")]
+            ActiveAsr::Local(asr) => Ok(Arc::clone(asr).transcribe().await?),
+        }
+    }
+}
+
 fn asr_transcribe_uses_global_timeout(asr: &ActiveAsr) -> bool {
     match asr {
         #[cfg(target_os = "windows")]
@@ -225,8 +269,8 @@ struct Inner {
     /// 最近一次应用到 capsule 窗口的几何状态。避免录音 level tick 反复触发
     /// resize / reposition。
     capsule_layout: Mutex<Option<CapsuleLayoutState>>,
-    /// QA 用的 ASR 句柄（始终是 Volcengine 流式）。
-    qa_asr: Mutex<Option<Arc<VolcengineStreamingASR>>>,
+    /// QA 用的 ASR 句柄，跟随当前 ASR provider。
+    qa_asr: Mutex<Option<ActiveAsr>>,
     /// QA 用的 Recorder 句柄。
     qa_recorder: Mutex<Option<Recorder>>,
     /// QA SSE 流取消标志。begin_qa_session 重置为 false；cancel_qa_session 设 true；
@@ -752,6 +796,10 @@ impl Coordinator {
     pub fn qa_window_pin(&self, pinned: bool) {
         self.inner.qa_state.lock().pinned = pinned;
         log::info!("[coord] QA window pinned={pinned}");
+    }
+
+    pub async fn qa_record_toggle(&self) {
+        handle_qa_option_edge(&self.inner).await;
     }
 
     pub fn history(&self) -> &HistoryStore {
@@ -1728,7 +1776,10 @@ fn sync_custom_dictation_to_plugin(inner: &Arc<Inner>) {
         return;
     }
     match crate::linux_fcitx::set_custom_dictation_trigger(&key_string) {
-        Ok(()) => log::info!("[fcitx] Synced custom dictation trigger '{}' to plugin", key_string),
+        Ok(()) => log::info!(
+            "[fcitx] Synced custom dictation trigger '{}' to plugin",
+            key_string
+        ),
         Err(e) => log::warn!("[fcitx] Failed to sync custom dictation trigger: {e}"),
     }
 }
@@ -2092,29 +2143,59 @@ fn should_try_non_tsf_insertion_fallback(
 fn insert_via_non_tsf_fallback(
     inner: &Arc<Inner>,
     polished: &str,
-    _restore_clipboard: bool,
-    _paste_shortcut: PasteShortcut,
+    restore_clipboard: bool,
+    paste_shortcut: PasteShortcut,
 ) -> InsertStatus {
-    let status = finish_non_tsf_insertion_fallback(
-        || inner.inserter.insert_via_unicode_keystrokes(polished),
-        || inner.inserter.copy_fallback(polished),
-    );
+    let prefer_clipboard_paste = !inner.prefs.get().streaming_insert;
+    let status = if prefer_clipboard_paste {
+        finish_non_tsf_insertion_fallback(
+            || {
+                inner.inserter.insert_via_clipboard_fallback(
+                    polished,
+                    restore_clipboard,
+                    paste_shortcut,
+                )
+            },
+            || inner.inserter.copy_fallback(polished),
+        )
+    } else {
+        finish_non_tsf_insertion_fallback(
+            || inner.inserter.insert_via_unicode_keystrokes(polished),
+            || inner.inserter.copy_fallback(polished),
+        )
+    };
 
     match status {
-        InsertStatus::Inserted => {
-            log::warn!(
-                "[windows-ime] TSF unavailable; inserted via paced Unicode SendInput fallback"
-            );
+        InsertStatus::Inserted | InsertStatus::PasteSent => {
+            if prefer_clipboard_paste {
+                log::warn!("[windows-ime] TSF unavailable; inserted via clipboard paste fallback");
+            } else {
+                log::warn!(
+                    "[windows-ime] TSF unavailable; inserted via paced Unicode SendInput fallback"
+                );
+            }
         }
         InsertStatus::CopiedFallback => {
-            log::warn!(
-                "[windows-ime] TSF unavailable; Unicode SendInput failed, left text on clipboard"
-            );
+            if prefer_clipboard_paste {
+                log::warn!(
+                    "[windows-ime] TSF unavailable; clipboard paste fallback failed, left text on clipboard"
+                );
+            } else {
+                log::warn!(
+                    "[windows-ime] TSF unavailable; Unicode SendInput failed, left text on clipboard"
+                );
+            }
         }
-        InsertStatus::PasteSent | InsertStatus::Failed => {
-            log::warn!(
-                "[windows-ime] TSF unavailable; Unicode SendInput fallback failed and copy fallback failed"
-            );
+        InsertStatus::Failed => {
+            if prefer_clipboard_paste {
+                log::warn!(
+                    "[windows-ime] TSF unavailable; clipboard paste fallback failed and copy fallback failed"
+                );
+            } else {
+                log::warn!(
+                    "[windows-ime] TSF unavailable; Unicode SendInput fallback failed and copy fallback failed"
+                );
+            }
         }
     }
 
@@ -2123,16 +2204,17 @@ fn insert_via_non_tsf_fallback(
 
 #[cfg(any(target_os = "windows", test))]
 fn finish_non_tsf_insertion_fallback<U, C>(
-    mut unicode_fallback: U,
+    mut primary_fallback: U,
     mut copy_only_fallback: C,
 ) -> InsertStatus
 where
     U: FnMut() -> InsertStatus,
     C: FnMut() -> InsertStatus,
 {
-    match unicode_fallback() {
-        InsertStatus::Inserted => InsertStatus::Inserted,
-        InsertStatus::PasteSent | InsertStatus::CopiedFallback | InsertStatus::Failed => {
+    let primary_status = primary_fallback();
+    match primary_status {
+        InsertStatus::Inserted | InsertStatus::PasteSent => primary_status,
+        InsertStatus::CopiedFallback | InsertStatus::Failed => {
             match copy_only_fallback() {
                 InsertStatus::CopiedFallback => InsertStatus::CopiedFallback,
                 // TextInserter::copy_fallback is copy-only: success is CopiedFallback.
@@ -2178,6 +2260,21 @@ mod non_tsf_fallback_tests {
 
         assert_eq!(status, InsertStatus::CopiedFallback);
         assert!(copy_called);
+    }
+
+    #[test]
+    fn paste_sent_primary_fallback_counts_as_inserted() {
+        let mut copy_called = false;
+        let status = finish_non_tsf_insertion_fallback(
+            || InsertStatus::PasteSent,
+            || {
+                copy_called = true;
+                InsertStatus::CopiedFallback
+            },
+        );
+
+        assert_eq!(status, InsertStatus::PasteSent);
+        assert!(!copy_called);
     }
 
     #[test]
@@ -2469,22 +2566,78 @@ fn apply_chinese_script_preference(text: &str, pref: ChineseScriptPreference) ->
     }
 }
 
-/// QA 路径专用：begin_qa_session 永远走 Volcengine 流式（低延迟要求），所以
-/// 凭据校验也只看 Volcengine 字段，不依赖 active_asr。dictation 路径请用
-/// `ensure_asr_credentials`。
-fn ensure_qa_volcengine_credentials() -> Result<(), String> {
-    let creds = read_volc_credentials();
-    if creds.app_id.trim().is_empty() || creds.access_token.trim().is_empty() {
-        Err("请先在设置中填写火山引擎 ASR App Key 和 Access Key".to_string())
-    } else {
-        Ok(())
-    }
-}
-
 /// 润色文本；失败时返回原文 + 失败原因，调用方据此弹错误胶囊 + 写历史 error_code。
 /// 之前固定返回 String，调用方拿不到失败信号 → 用户感知"为什么风格设置没生效"。issue #57。
 /// 流式润色的三态结果。让上层（dictation pipeline）能区分「已经流出去了」、
 /// 「降级到一次性」和「真失败了走 raw 兜底」三种 case。
+fn cancel_qa_asr(inner: &Arc<Inner>) {
+    if let Some(asr) = inner.qa_asr.lock().take() {
+        asr.cancel();
+    }
+}
+
+fn qa_batch_asr_chunk_limit_ms(provider_id: &str) -> Option<u64> {
+    match provider_id {
+        "zhipu" => Some(30_000),
+        _ => None,
+    }
+}
+
+async fn start_qa_recorder_with_consumer(
+    inner: &Arc<Inner>,
+    consumer: Arc<dyn crate::recorder::AudioConsumer>,
+) -> Result<(), String> {
+    let inner_for_level = Arc::clone(inner);
+    let last_emit_at = Arc::new(Mutex::new(None::<Instant>));
+    const LEVEL_EMIT_MIN_INTERVAL_MS: u64 = 33;
+    let level_handler: Arc<dyn Fn(f32) + Send + Sync> = Arc::new(move |level| {
+        let phase = inner_for_level.qa_state.lock().phase;
+        if phase != QaPhase::Recording {
+            return;
+        }
+        let now = Instant::now();
+        {
+            let mut last = last_emit_at.lock();
+            if let Some(prev) = *last {
+                if now.duration_since(prev).as_millis() < LEVEL_EMIT_MIN_INTERVAL_MS as u128 {
+                    return;
+                }
+            }
+            *last = Some(now);
+        }
+        if let Some(app) = inner_for_level.app.lock().clone() {
+            let _ = app.emit_to("qa", "qa:level", serde_json::json!({ "level": level }));
+        }
+        emit_capsule(
+            &inner_for_level,
+            CapsuleState::Recording,
+            level,
+            0,
+            None,
+            None,
+        );
+    });
+
+    let microphone_device_name = selected_microphone_device_name(inner);
+    stop_microphone_preview_monitor(inner, "QA recorder");
+    acquire_recording_mute(inner, "qa").await;
+    match Recorder::start(microphone_device_name, consumer, level_handler, None) {
+        Ok((rec, runtime_errors, archive_active)) => {
+            inner
+                .audio_archive_active
+                .store(archive_active, std::sync::atomic::Ordering::Relaxed);
+            *inner.qa_recorder.lock() = Some(rec);
+            spawn_qa_recorder_error_monitor(inner, runtime_errors);
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("[coord] QA recorder start failed: {e}");
+            release_recording_mute(inner, "qa");
+            Err(format!("recorder start failed: {e}"))
+        }
+    }
+}
+
 pub enum StreamingPolishOutcome {
     /// 流式润色成功，`String` 是已经一边流一边交给 `on_delta` 的全部文本（用于写
     /// history、做词条命中统计）。调用方不应再 `inserter.insert(&text)`，因为字符
@@ -2900,18 +3053,14 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         );
     }
 
-    // 2. 凭据缺失走静默 fallback：与 dictation 一致的"用户的话不丢"约定。
-    //    缺火山凭据 → 后续 Recorder 仍会跑，只是 ASR 拿不到结果，end_qa_session
-    //    会发 idle 事件关浮窗。
-    //    注意：QA 强制走 Volcengine 流式（见下方注释），所以这里必须直接校验
-    //    Volcengine 字段，不能复用 `ensure_asr_credentials`——后者会按用户在设置
-    //    里选的 active_asr 走 OpenAI 兼容分支，让 QA 把 `asr.api_key` 当成必要项，
-    //    或在 Volcengine 凭据其实为空时误判通过。Codex P1，PR #213。
-    if let Err(message) = ensure_qa_volcengine_credentials() {
+    // 2. 跟 dictation 一样按当前 ASR provider 做凭据检查，避免 QA 被火山 ASR 绑死。
+    if let Err(message) = ensure_asr_credentials() {
         log::warn!("[coord] QA: ASR credentials missing: {message}");
         finish_qa_with_error(inner, format!("缺少 ASR 凭据：{message}"));
         return Err(message);
     }
+
+    let active_asr = CredentialsVault::get_active_asr();
 
     if let Err(message) = ensure_microphone_permission(inner) {
         log::warn!("[coord] QA: microphone permission gate failed: {message}");
@@ -2919,13 +3068,191 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         return Err(message);
     }
 
-    // 3. 启动 Recorder + ASR（强制走 Volcengine 流式：QA 必须低延迟）。
+    // 3. 启动 Recorder + 当前 ASR provider。
+    #[cfg(target_os = "windows")]
+    if foundry::is_foundry_local_whisper(&active_asr) {
+        let prefs = inner.prefs.get();
+        let model_alias = if foundry::model_alias_is_known(&prefs.foundry_local_asr_model) {
+            prefs.foundry_local_asr_model.clone()
+        } else {
+            foundry::DEFAULT_MODEL_ALIAS.to_string()
+        };
+        let language_hint = prefs.foundry_local_asr_language_hint.trim().to_string();
+        let language_hint = if language_hint.is_empty() {
+            None
+        } else {
+            Some(language_hint)
+        };
+        let local = Arc::new(FoundryLocalWhisperAsr::new(
+            Arc::clone(&inner.foundry_local_runtime),
+            model_alias,
+            prefs.foundry_local_runtime_source.clone(),
+            language_hint,
+        ));
+        *inner.qa_asr.lock() = Some(ActiveAsr::FoundryLocalWhisper(Arc::clone(&local)));
+        let consumer: Arc<dyn crate::recorder::AudioConsumer> = local;
+        if let Err(message) = start_qa_recorder_with_consumer(inner, consumer).await {
+            cancel_qa_asr(inner);
+            finish_qa_with_error(inner, message.clone());
+            return Err(message);
+        }
+        if inner.qa_state.lock().cancelled {
+            cancel_qa_asr(inner);
+            stop_qa_recorder(inner);
+            inner.qa_state.lock().phase = QaPhase::Idle;
+            return Ok(());
+        }
+        emit_capsule(inner, CapsuleState::Recording, 0.0, 0, None, None);
+        return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    if sherpa::is_sherpa_onnx_local(&active_asr) {
+        let prefs = inner.prefs.get();
+        let model_alias = if sherpa::model_alias_is_known(&prefs.sherpa_onnx_model) {
+            prefs.sherpa_onnx_model.clone()
+        } else {
+            sherpa::DEFAULT_MODEL_ALIAS.to_string()
+        };
+        let language_hint = prefs.sherpa_onnx_language_hint.trim().to_string();
+        let language_hint = if language_hint.is_empty() {
+            None
+        } else {
+            Some(language_hint)
+        };
+        let token_handler = inner.app.lock().clone().map(|app| {
+            Arc::new(move |piece: String| {
+                if let Err(error) = app.emit("local-asr-token", piece) {
+                    log::warn!("[sherpa-asr] emit token failed: {error}");
+                }
+            }) as crate::asr::local::sherpa_provider::SherpaTokenHandler
+        });
+        let local = match SherpaOnnxAsr::new_for_model(
+            Arc::clone(&inner.sherpa_onnx_runtime),
+            model_alias,
+            language_hint,
+            token_handler,
+        )
+        .await
+        {
+            Ok(local) => Arc::new(local),
+            Err(e) => {
+                log::error!("[coord] QA: sherpa-onnx init failed: {e:#}");
+                let message = format!("sherpa-onnx init failed: {e}");
+                finish_qa_with_error(inner, message.clone());
+                return Err(message);
+            }
+        };
+        *inner.qa_asr.lock() = Some(ActiveAsr::SherpaOnnxLocal(Arc::clone(&local)));
+        let consumer: Arc<dyn crate::recorder::AudioConsumer> = local;
+        if let Err(message) = start_qa_recorder_with_consumer(inner, consumer).await {
+            cancel_qa_asr(inner);
+            finish_qa_with_error(inner, message.clone());
+            return Err(message);
+        }
+        if inner.qa_state.lock().cancelled {
+            cancel_qa_asr(inner);
+            stop_qa_recorder(inner);
+            inner.qa_state.lock().phase = QaPhase::Idle;
+            return Ok(());
+        }
+        emit_capsule(inner, CapsuleState::Recording, 0.0, 0, None, None);
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    if crate::asr::local::is_local_qwen3(&active_asr) {
+        let local = match build_local_qwen3(inner).await {
+            Ok(local) => local,
+            Err(e) => {
+                log::error!("[coord] QA: local Qwen3-ASR init failed: {e:#}");
+                let message = format!("local ASR init failed: {e}");
+                finish_qa_with_error(inner, message.clone());
+                return Err(message);
+            }
+        };
+        *inner.qa_asr.lock() = Some(ActiveAsr::Local(Arc::clone(&local)));
+        let consumer: Arc<dyn crate::recorder::AudioConsumer> = local;
+        if let Err(message) = start_qa_recorder_with_consumer(inner, consumer).await {
+            cancel_qa_asr(inner);
+            finish_qa_with_error(inner, message.clone());
+            return Err(message);
+        }
+        if inner.qa_state.lock().cancelled {
+            cancel_qa_asr(inner);
+            stop_qa_recorder(inner);
+            inner.qa_state.lock().phase = QaPhase::Idle;
+            return Ok(());
+        }
+        emit_capsule(inner, CapsuleState::Recording, 0.0, 0, None, None);
+        return Ok(());
+    }
+
+    if is_bailian_provider(&active_asr) {
+        let asr = Arc::new(BailianRealtimeASR::new(read_bailian_credentials()));
+        let bridge = Arc::new(DeferredAsrBridge::new());
+        let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
+        *inner.qa_asr.lock() = Some(ActiveAsr::Bailian(Arc::clone(&asr)));
+        if let Err(message) = start_qa_recorder_with_consumer(inner, consumer).await {
+            cancel_qa_asr(inner);
+            finish_qa_with_error(inner, message.clone());
+            return Err(message);
+        }
+        if let Err(e) = asr.open_session().await {
+            log::error!("[coord] QA: open Bailian ASR session failed: {e}");
+            stop_qa_recorder(inner);
+            cancel_qa_asr(inner);
+            let message = format!("ASR session failed: {e}");
+            finish_qa_with_error(inner, message.clone());
+            return Err(message);
+        }
+        if inner.qa_state.lock().cancelled {
+            cancel_qa_asr(inner);
+            stop_qa_recorder(inner);
+            inner.qa_state.lock().phase = QaPhase::Idle;
+            return Ok(());
+        }
+        let target: Arc<dyn crate::asr::AudioConsumer> = asr;
+        let flushed = bridge.attach(target);
+        log::info!("[coord] QA Bailian ASR connected; flushed {flushed} deferred audio bytes");
+        emit_capsule(inner, CapsuleState::Recording, 0.0, 0, None, None);
+        return Ok(());
+    }
+
+    if is_whisper_compatible_provider(&active_asr) {
+        let (api_key, base_url, model) = read_whisper_credentials();
+        let whisper_prompt =
+            crate::asr::whisper::build_prompt_from_phrases(&enabled_phrases(inner));
+        let whisper = Arc::new(WhisperBatchASR::new(
+            api_key,
+            base_url,
+            model,
+            whisper_prompt,
+            qa_batch_asr_chunk_limit_ms(&active_asr),
+        ));
+        *inner.qa_asr.lock() = Some(ActiveAsr::Whisper(Arc::clone(&whisper)));
+        let consumer: Arc<dyn crate::recorder::AudioConsumer> = whisper;
+        if let Err(message) = start_qa_recorder_with_consumer(inner, consumer).await {
+            cancel_qa_asr(inner);
+            finish_qa_with_error(inner, message.clone());
+            return Err(message);
+        }
+        if inner.qa_state.lock().cancelled {
+            cancel_qa_asr(inner);
+            stop_qa_recorder(inner);
+            inner.qa_state.lock().phase = QaPhase::Idle;
+            return Ok(());
+        }
+        emit_capsule(inner, CapsuleState::Recording, 0.0, 0, None, None);
+        return Ok(());
+    }
+
     let hotwords = enabled_hotwords(inner);
     let creds = read_volc_credentials();
     let asr = Arc::new(VolcengineStreamingASR::new(creds, hotwords));
     let bridge = Arc::new(DeferredAsrBridge::new());
     let consumer: Arc<dyn crate::recorder::AudioConsumer> = bridge.clone();
-    *inner.qa_asr.lock() = Some(Arc::clone(&asr));
+    *inner.qa_asr.lock() = Some(ActiveAsr::Volcengine(Arc::clone(&asr)));
 
     // QA recorder 不需要 RMS 节流到胶囊；前端 QA 浮窗有自己的电平视图，
     // 这里发一份事件给 "qa" label 用就够了。
@@ -3068,6 +3395,24 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         }
     };
 
+    #[cfg(target_os = "windows")]
+    match &asr {
+        ActiveAsr::FoundryLocalWhisper(_) => {
+            let release_session_id = inner.state.lock().session_id;
+            schedule_foundry_local_asr_release(inner, release_session_id);
+        }
+        ActiveAsr::SherpaOnnxLocal(_) => {
+            let release_session_id = inner.state.lock().session_id;
+            schedule_sherpa_onnx_release(inner, release_session_id);
+        }
+        _ => {}
+    }
+    #[cfg(target_os = "macos")]
+    if matches!(&asr, ActiveAsr::Local(_)) {
+        inner.local_asr_cache.touch();
+        schedule_local_asr_release(inner);
+    }
+
     // cancel race：用户在 transcribe 中按 Esc / dismiss → 静默退出。
     if inner.qa_state.lock().cancelled {
         log::info!("[coord] QA cancel detected after ASR — discarding transcript");
@@ -3132,7 +3477,12 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
     let working_languages = prefs.working_languages.clone();
     let chinese_script_preference = prefs.chinese_script_preference;
     let output_language_preference = prefs.output_language_preference;
-    let llm_thinking_enabled = prefs.llm_thinking_enabled;
+    let llm_thinking_enabled = prefs
+        .qa_llm_thinking_enabled
+        .unwrap_or(prefs.llm_thinking_enabled);
+    let qa_streaming_answer = prefs.streaming_insert;
+    let qa_llm_provider = prefs.qa_llm_provider.clone();
+    let qa_llm_model = prefs.qa_llm_model.clone();
     let (messages_for_llm, front_app) = {
         let st = inner.qa_state.lock();
         (st.messages.clone(), st.front_app.clone())
@@ -3147,6 +3497,9 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
     let captured_session_id = inner.qa_state.lock().session_id;
     let inner_for_delta = Arc::clone(inner);
     let on_delta = move |chunk: &str| {
+        if !qa_streaming_answer {
+            return;
+        }
         let cur_id = inner_for_delta.qa_state.lock().session_id;
         if cur_id != captured_session_id {
             return; // 旧 session 漏来的 chunk，丢弃
@@ -3174,6 +3527,8 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         chinese_script_preference,
         output_language_preference,
         llm_thinking_enabled,
+        qa_llm_provider.as_deref(),
+        qa_llm_model.as_deref(),
         front_app.as_deref(),
         on_delta,
         should_cancel,
@@ -3329,6 +3684,8 @@ async fn answer_chat_dispatch<F, C>(
     chinese_script_preference: ChineseScriptPreference,
     output_language_preference: OutputLanguagePreference,
     llm_thinking_enabled: bool,
+    llm_provider_override: Option<&str>,
+    llm_model_override: Option<&str>,
     front_app: Option<&str>,
     on_delta: F,
     should_cancel: C,
@@ -3339,9 +3696,20 @@ where
 {
     // 见 polish_text 顶部注释——同样的 Gemini / OpenAI-compatible 路由逻辑，
     // QA 流式回答走 Gemini 原生 :streamGenerateContent?alt=sse。
-    let active_llm = CredentialsVault::get_active_llm();
+    let provider_override = llm_provider_override
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    let active_llm = llm_provider_override
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(CredentialsVault::get_active_llm);
+    let model_override = llm_model_override
+        .map(str::trim)
+        .filter(|model| !model.is_empty());
     if active_llm == "gemini" {
-        let (api_key, model, base_url) = read_gemini_credentials()?;
+        let (api_key, model, base_url) =
+            read_gemini_credentials_for_provider(provider_override, model_override)?;
         let provider = GeminiProvider::new(
             GeminiConfig::new(api_key, model, base_url).with_thinking_enabled(llm_thinking_enabled),
         );
@@ -3358,7 +3726,7 @@ where
             .await?);
     }
 
-    let provider = build_active_llm_provider(llm_thinking_enabled)?;
+    let provider = build_llm_provider(provider_override, model_override, llm_thinking_enabled)?;
     Ok(provider
         .answer_chat_streaming(
             messages,
@@ -3382,13 +3750,39 @@ where
 /// base_url 末尾去掉 `/`，让 `llm_gemini::generate_content_url` 拼接稳定。
 /// 不去 `/chat/completions` 后缀——OpenAI 兼容路径才会有那个后缀，原生 Gemini 不会。
 fn read_gemini_credentials() -> anyhow::Result<(String, String, String)> {
-    let api_key = CredentialsVault::get(CredentialAccount::ArkApiKey)?.unwrap_or_default();
-    let model = CredentialsVault::get(CredentialAccount::ArkModelId)?
-        .filter(|s| !s.trim().is_empty())
+    read_gemini_credentials_for_provider(None, None)
+}
+
+fn read_gemini_credentials_for_provider(
+    provider_override: Option<&str>,
+    model_override: Option<&str>,
+) -> anyhow::Result<(String, String, String)> {
+    let provider_credentials = provider_override
+        .map(CredentialsVault::get_llm_provider_credentials)
+        .transpose()?;
+    let api_key = match provider_credentials.as_ref() {
+        Some(credentials) => credentials.api_key.clone().unwrap_or_default(),
+        None => CredentialsVault::get(CredentialAccount::ArkApiKey)?.unwrap_or_default(),
+    };
+    let stored_model = match provider_credentials.as_ref() {
+        Some(credentials) => credentials.model.clone(),
+        None => {
+            CredentialsVault::get(CredentialAccount::ArkModelId)?.filter(|s| !s.trim().is_empty())
+        }
+    };
+    let model = model_override
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .map(str::to_string)
+        .or(stored_model)
         .unwrap_or_else(|| "gemini-2.5-flash".to_string());
-    let base_url = CredentialsVault::get(CredentialAccount::ArkEndpoint)?
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "https://generativelanguage.googleapis.com/v1beta".to_string());
+    let base_url = match provider_credentials.as_ref() {
+        Some(credentials) => credentials.base_url.clone(),
+        None => {
+            CredentialsVault::get(CredentialAccount::ArkEndpoint)?.filter(|s| !s.trim().is_empty())
+        }
+    }
+    .unwrap_or_else(|| "https://generativelanguage.googleapis.com/v1beta".to_string());
     if api_key.trim().is_empty() {
         anyhow::bail!("API Key 为空");
     }
@@ -3397,9 +3791,35 @@ fn read_gemini_credentials() -> anyhow::Result<(String, String, String)> {
 }
 
 fn build_active_llm_provider(llm_thinking_enabled: bool) -> anyhow::Result<ActiveLLMProvider> {
-    let active = CredentialsVault::get_active_llm();
-    let model =
-        CredentialsVault::get(CredentialAccount::ArkModelId)?.filter(|s| !s.trim().is_empty());
+    build_llm_provider(None, None, llm_thinking_enabled)
+}
+
+fn build_llm_provider(
+    active_override: Option<&str>,
+    model_override: Option<&str>,
+    llm_thinking_enabled: bool,
+) -> anyhow::Result<ActiveLLMProvider> {
+    let active_override_id = active_override
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
+    let active = active_override_id
+        .clone()
+        .unwrap_or_else(CredentialsVault::get_active_llm);
+    let provider_credentials = active_override_id
+        .as_deref()
+        .map(CredentialsVault::get_llm_provider_credentials)
+        .transpose()?;
+    let stored_model = if let Some(credentials) = provider_credentials.as_ref() {
+        credentials.model.clone()
+    } else {
+        CredentialsVault::get(CredentialAccount::ArkModelId)?.filter(|s| !s.trim().is_empty())
+    };
+    let model = model_override
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .map(str::to_string)
+        .or(stored_model);
     if active == CODEX_OAUTH_PROVIDER_ID {
         let config =
             CodexOAuthConfig::new(model.unwrap_or_else(|| CODEX_DEFAULT_MODEL.to_string()))
@@ -3407,9 +3827,17 @@ fn build_active_llm_provider(llm_thinking_enabled: bool) -> anyhow::Result<Activ
         return Ok(ActiveLLMProvider::Codex(CodexOAuthLLMProvider::new(config)));
     }
 
-    let api_key = CredentialsVault::get(CredentialAccount::ArkApiKey)?.unwrap_or_default();
-    let model = model.unwrap_or_else(|| "deepseek-v3-2".to_string());
-    let endpoint = resolve_ark_endpoint(&api_key)?;
+    let api_key = match provider_credentials.as_ref() {
+        Some(credentials) => credentials.api_key.clone().unwrap_or_default(),
+        None => CredentialsVault::get(CredentialAccount::ArkApiKey)?.unwrap_or_default(),
+    };
+    let model = model.unwrap_or_else(|| default_llm_model_for_provider(&active).to_string());
+    let endpoint = match provider_credentials.as_ref() {
+        Some(credentials) => {
+            resolve_ark_endpoint_with_policy(&api_key, credentials.base_url.clone())?
+        }
+        None => resolve_ark_endpoint(&api_key)?,
+    };
     let base_url = endpoint
         .trim_end_matches("/chat/completions")
         .trim_end_matches('/')
@@ -3419,6 +3847,19 @@ fn build_active_llm_provider(llm_thinking_enabled: bool) -> anyhow::Result<Activ
     Ok(ActiveLLMProvider::OpenAI(OpenAICompatibleLLMProvider::new(
         config,
     )))
+}
+
+fn default_llm_model_for_provider(provider_id: &str) -> &'static str {
+    match provider_id {
+        "deepseek" => "deepseek-v4-flash",
+        "siliconflow" => "Qwen/Qwen2.5-7B-Instruct",
+        "openai" => "gpt-4o",
+        "mimo" => "xiaomi/mimo-v2-flash",
+        "openrouterFree" => "qwen/qwen3-coder:free",
+        "alibabaCoding" => "qwen3-coder-plus",
+        "codingPlanX" => "gpt-5-mini",
+        _ => "deepseek-v3-2",
+    }
 }
 
 fn resolve_ark_endpoint(api_key: &str) -> anyhow::Result<String> {
@@ -4628,7 +5069,9 @@ fn emit_capsule(
                     std::thread::spawn(move || {
                         let current = LAST_AUX.lock().unwrap().clone();
                         if current.as_deref() != Some(&text) {
-                            log::info!("[capsule] set_aux_down skipped: state changed to {current:?}");
+                            log::info!(
+                                "[capsule] set_aux_down skipped: state changed to {current:?}"
+                            );
                             return;
                         }
                         if let Err(e) = crate::linux_fcitx::set_aux_down(&text) {
@@ -4636,7 +5079,10 @@ fn emit_capsule(
                         }
                     });
                     // 终态（Done/Cancelled/Error）3 秒后自动清除，避免一直跟随焦点。
-                    if matches!(state, CapsuleState::Done | CapsuleState::Cancelled | CapsuleState::Error) {
+                    if matches!(
+                        state,
+                        CapsuleState::Done | CapsuleState::Cancelled | CapsuleState::Error
+                    ) {
                         let text = t.to_string();
                         std::thread::spawn(move || {
                             std::thread::sleep(std::time::Duration::from_secs(3));
@@ -4659,12 +5105,16 @@ fn emit_capsule(
                     std::thread::spawn(move || {
                         let latest_gen = RETRY_GEN.load(std::sync::atomic::Ordering::SeqCst);
                         if latest_gen > gen + 1 {
-                            log::info!("[capsule] clear_aux_down skipped: gen {gen}, latest {latest_gen}");
+                            log::info!(
+                                "[capsule] clear_aux_down skipped: gen {gen}, latest {latest_gen}"
+                            );
                             return;
                         }
                         let current = LAST_AUX.lock().unwrap().clone();
                         if current.is_some() {
-                            log::info!("[capsule] clear_aux_down skipped: state changed to {current:?}");
+                            log::info!(
+                                "[capsule] clear_aux_down skipped: state changed to {current:?}"
+                            );
                             return;
                         }
                         if let Err(e) = crate::linux_fcitx::clear_aux_down() {

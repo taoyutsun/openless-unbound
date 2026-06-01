@@ -8,9 +8,9 @@
 namespace {
 
 constexpr wchar_t kClsidKey[] =
-    L"Software\\Classes\\CLSID\\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}";
+    L"Software\\Classes\\CLSID\\{C5EA393C-5644-490A-A3F1-6828430E9BC6}";
 constexpr wchar_t kInprocServer32Key[] =
-    L"Software\\Classes\\CLSID\\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\\InprocServer32";
+    L"Software\\Classes\\CLSID\\{C5EA393C-5644-490A-A3F1-6828430E9BC6}\\InprocServer32";
 constexpr REGSAM kRegistryWriteAccess = KEY_WRITE;
 
 HRESULT HResultFromWin32Error(LSTATUS status) {

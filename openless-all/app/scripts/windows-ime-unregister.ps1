@@ -54,7 +54,7 @@ function Get-ManifestDllPath {
       return $property.Value
     }
   } catch {
-    Write-Host "[warn] Failed to read OpenLess IME registration manifest: $($_.Exception.Message)"
+    Write-Host "[warn] Failed to read OpenLess Unbound IME registration manifest: $($_.Exception.Message)"
   }
 
   return $null
@@ -113,7 +113,7 @@ function Get-DllPath {
 }
 
 if (-not (Test-IsAdministrator)) {
-  throw "Unregistering the OpenLess TSF IME requires an elevated Administrator PowerShell."
+  throw "Unregistering the OpenLess Unbound TSF IME requires an elevated Administrator PowerShell."
 }
 
 foreach ($platform in @("x64", "Win32")) {
@@ -128,7 +128,7 @@ foreach ($platform in @("x64", "Win32")) {
   if ($process.ExitCode -ne 0) {
     throw "$platform regsvr32 /u failed with exit code $($process.ExitCode)"
   }
-  Write-Host "[ok] OpenLess TSF IME unregistered ($platform)"
+  Write-Host "[ok] OpenLess Unbound TSF IME unregistered ($platform)"
 }
 
 if (Test-Path $registrationManifest) {

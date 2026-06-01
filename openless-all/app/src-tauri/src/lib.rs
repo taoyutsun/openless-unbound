@@ -132,7 +132,7 @@ pub fn run() {
         .manage(commands::TrayMicrophoneMenuState::new(Vec::new()))
         .setup(move |app| {
             init_file_logger();
-            log::info!("=== OpenLess 启动 ===");
+            log::info!("=== OpenLess Unbound 启动 ===");
 
             // Capsule 启动时定位到屏幕底部居中并隐藏；coordinator 按需显示。
             // 与 Swift `CapsuleWindowController.repositionToBottomCenter` 同语义。
@@ -262,7 +262,7 @@ pub fn run() {
             crate::linux_fcitx::ensure_plugin_installed(app.handle());
 
             // 菜单栏图标 — 与 Swift `MenuBarController` 同语义：
-            // 左键点 → 显示/聚焦主窗口；菜单含「显示主窗口」「退出」。
+            // 左鍵點選 → 顯示/聚焦主視窗；選單含「顯示主視窗」「結束」。
             let tray_menu = build_tray_menu(app, &coordinator)?;
             let menu = tray_menu.menu;
 
@@ -405,6 +405,7 @@ pub fn run() {
             commands::set_open_app_hotkey,
             commands::qa_window_dismiss,
             commands::qa_window_pin,
+            commands::qa_record_toggle,
             commands::validate_combo_hotkey,
             commands::set_combo_hotkey,
             commands::validate_provider_credentials,
@@ -522,6 +523,15 @@ fn tray_style_menu_enabled() -> bool {
     cfg!(target_os = "windows")
 }
 
+fn tray_polish_mode_label(mode: PolishMode) -> &'static str {
+    match mode {
+        PolishMode::Raw => "原文",
+        PolishMode::Light => "輕度潤色",
+        PolishMode::Structured => "清晰結構",
+        PolishMode::Formal => "正式表達",
+    }
+}
+
 fn tray_polish_mode_menu_entries(selected: PolishMode) -> Vec<TrayPolishModeMenuEntry> {
     [
         (PolishMode::Raw, "style-raw"),
@@ -532,7 +542,7 @@ fn tray_polish_mode_menu_entries(selected: PolishMode) -> Vec<TrayPolishModeMenu
     .into_iter()
     .map(|(mode, id)| TrayPolishModeMenuEntry {
         id: id.to_string(),
-        label: mode.display_name(),
+        label: tray_polish_mode_label(mode),
         mode,
         checked: mode == selected,
     })
@@ -553,9 +563,9 @@ fn build_tray_menu<M: Manager<tauri::Wry>>(
     app: &M,
     coordinator: &Arc<coordinator::Coordinator>,
 ) -> tauri::Result<TrayMenu> {
-    let toggle = MenuItemBuilder::with_id("toggle", "显示主窗口").build(app)?;
+    let toggle = MenuItemBuilder::with_id("toggle", "顯示主視窗").build(app)?;
     let microphone_menu = build_microphone_tray_menu(app, coordinator)?;
-    let quit = MenuItemBuilder::with_id("quit", "退出 OpenLess").build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "結束 OpenLess Unbound").build(app)?;
     let mut builder = MenuBuilder::new(app);
     let style_menu = if tray_style_menu_enabled() {
         Some(build_style_tray_menu(app, coordinator)?)
@@ -584,7 +594,7 @@ fn build_style_tray_menu<M: Manager<tauri::Wry>>(
         .get_or_default_active(&prefs.active_style_pack_id)
         .map(|pack| pack.base_mode)
         .unwrap_or(prefs.default_mode);
-    let mut submenu = SubmenuBuilder::with_id(app, "style", "输出风格");
+    let mut submenu = SubmenuBuilder::with_id(app, "style", "輸出風格");
     for entry in tray_polish_mode_menu_entries(selected) {
         let item = CheckMenuItemBuilder::with_id(&entry.id, entry.label)
             .checked(entry.checked)
@@ -602,7 +612,7 @@ fn build_microphone_tray_menu<M: Manager<tauri::Wry>>(
 ) -> tauri::Result<MicrophoneTrayMenu> {
     let selected = coordinator.prefs().get().microphone_device_name;
     let mut items = Vec::new();
-    let mut submenu = SubmenuBuilder::with_id(app, "microphone", "选择麦克风");
+    let mut submenu = SubmenuBuilder::with_id(app, "microphone", "選擇麥克風");
     let devices = match recorder::list_input_devices() {
         Ok(devices) => devices,
         Err(err) => {
@@ -613,7 +623,7 @@ fn build_microphone_tray_menu<M: Manager<tauri::Wry>>(
     let selected_available =
         selected.trim().is_empty() || devices.iter().any(|device| device.name == selected);
 
-    let default_item = CheckMenuItemBuilder::with_id("mic-default", "系统默认麦克风")
+    let default_item = CheckMenuItemBuilder::with_id("mic-default", "系統預設麥克風")
         .checked(selected.trim().is_empty() || !selected_available)
         .build(app)?;
     submenu = submenu.item(&default_item);
@@ -624,7 +634,7 @@ fn build_microphone_tray_menu<M: Manager<tauri::Wry>>(
     });
 
     if devices.is_empty() {
-        let empty = MenuItemBuilder::with_id("mic-empty", "未发现麦克风")
+        let empty = MenuItemBuilder::with_id("mic-empty", "未偵測到麥克風")
             .enabled(false)
             .build(app)?;
         submenu = submenu.item(&empty);
@@ -632,7 +642,7 @@ fn build_microphone_tray_menu<M: Manager<tauri::Wry>>(
         for (index, device) in devices.into_iter().enumerate() {
             let id = format!("mic-device-{index}");
             let label = if device.is_default {
-                format!("{}（系统默认）", device.name)
+                format!("{}（系統預設）", device.name)
             } else {
                 device.name.clone()
             };
@@ -810,7 +820,7 @@ fn restart_app(app: AppHandle) {
     app.restart();
 }
 
-/// 把日志同时写到 stderr + ~/Library/Logs/OpenLess/openless.log（match Swift `Log.swift`）。
+/// 把日志同时写到 stderr + app-specific Logs/openless.log（match Swift `Log.swift`）。
 fn init_file_logger() {
     use simplelog::{
         ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
@@ -863,14 +873,14 @@ pub fn log_dir_path() -> std::path::PathBuf {
             return std::path::PathBuf::from(home)
                 .join("Library")
                 .join("Logs")
-                .join("OpenLess");
+                .join("OpenLess Unbound");
         }
     }
     #[cfg(target_os = "windows")]
     {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
             return std::path::PathBuf::from(local)
-                .join("OpenLess")
+                .join("OpenLess Unbound")
                 .join("Logs");
         }
     }
@@ -880,11 +890,11 @@ pub fn log_dir_path() -> std::path::PathBuf {
             return std::path::PathBuf::from(home)
                 .join(".local")
                 .join("share")
-                .join("OpenLess")
+                .join("OpenLess Unbound")
                 .join("logs");
         }
     }
-    std::env::temp_dir().join("OpenLess")
+    std::env::temp_dir().join("OpenLess Unbound")
 }
 
 pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
@@ -1352,9 +1362,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 ("style-raw", "原文", PolishMode::Raw, false),
-                ("style-light", "轻度润色", PolishMode::Light, false),
-                ("style-structured", "清晰结构", PolishMode::Structured, true),
-                ("style-formal", "正式表达", PolishMode::Formal, false),
+                ("style-light", "輕度潤色", PolishMode::Light, false),
+                ("style-structured", "清晰結構", PolishMode::Structured, true),
+                ("style-formal", "正式表達", PolishMode::Formal, false),
             ]
         );
     }

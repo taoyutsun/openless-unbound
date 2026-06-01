@@ -9,22 +9,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$TextServiceClsid = "{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}"
-$ProfileGuid = "{9B5F5E04-23F6-47DA-9A26-D221F6C3F02E}"
-$LangId = "0x00000804"
+$TextServiceClsid = "{C5EA393C-5644-490A-A3F1-6828430E9BC6}"
+$ProfileGuid = "{A3A75150-B165-4F0A-A2AB-B1E59D76A5F8}"
+$LangId = "0x00000404"
 $KeyboardCategoryGuid = "{34745C63-B2F0-4784-8B67-5E12C8701A31}"
 $ImmersiveCategoryGuid = "{13A016DF-560B-46CD-947A-4C3AF1E0E35D}"
 $SystrayCategoryGuid = "{25504FB4-7BAB-4BC1-9C69-CF81890F0EF5}"
 
 # Keep this script aligned with the backend status check and the TSF IPC path
-# used by OpenLessImeSubmit-* named pipes.
+# used by OpenLessUnboundImeSubmit-* named pipes.
 $ExpectedBackendKeys = @(
-  "Software\Classes\CLSID\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\InprocServer32",
-  "Software\WOW6432Node\Classes\CLSID\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\InprocServer32",
-  "Software\Microsoft\CTF\TIP\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\LanguageProfile\0x00000804\{9B5F5E04-23F6-47DA-9A26-D221F6C3F02E}",
-  "Software\Microsoft\CTF\TIP\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\Category\Category\{34745C63-B2F0-4784-8B67-5E12C8701A31}\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}",
-  "Software\Microsoft\CTF\TIP\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\Category\Category\{13A016DF-560B-46CD-947A-4C3AF1E0E35D}\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}",
-  "Software\Microsoft\CTF\TIP\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}\Category\Category\{25504FB4-7BAB-4BC1-9C69-CF81890F0EF5}\{6B9F3F4F-5EE7-42D6-9C61-9F80B03A5D7D}"
+  "Software\Classes\CLSID\$TextServiceClsid\InprocServer32",
+  "Software\WOW6432Node\Classes\CLSID\$TextServiceClsid\InprocServer32",
+  "Software\Microsoft\CTF\TIP\$TextServiceClsid\LanguageProfile\$LangId\$ProfileGuid",
+  "Software\Microsoft\CTF\TIP\$TextServiceClsid\Category\Category\$KeyboardCategoryGuid\$TextServiceClsid",
+  "Software\Microsoft\CTF\TIP\$TextServiceClsid\Category\Category\$ImmersiveCategoryGuid\$TextServiceClsid",
+  "Software\Microsoft\CTF\TIP\$TextServiceClsid\Category\Category\$SystrayCategoryGuid\$TextServiceClsid"
 )
 
 function Test-IsAdministrator {
@@ -149,7 +149,7 @@ function Assert-OpenLessImeInstalled {
     throw "x86 COM DLL path points outside the installed IME directory. Expected '$expectedX86', got '$x86Dll'"
   }
   if (-not (Test-Path -LiteralPath (Join-Path $installRoot "openless.exe") -PathType Leaf)) {
-    throw "Installed OpenLess executable not found under $installRoot"
+    throw "Installed OpenLess Unbound executable not found under $installRoot"
   }
 
   Assert-RegistryKey -View Registry64 -SubKey "Software\Microsoft\CTF\TIP\$TextServiceClsid\LanguageProfile\$LangId\$ProfileGuid" -Label "TSF language profile"

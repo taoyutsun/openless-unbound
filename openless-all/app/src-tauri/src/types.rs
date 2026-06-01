@@ -583,6 +583,12 @@ pub struct UserPreferences {
     /// 详见 issue #118。
     #[serde(default)]
     pub qa_save_history: bool,
+    #[serde(default)]
+    pub qa_llm_provider: Option<String>,
+    #[serde(default)]
+    pub qa_llm_model: Option<String>,
+    #[serde(default)]
+    pub qa_llm_thinking_enabled: Option<bool>,
     /// 自定义录音组合键。当 `hotkey.trigger == Custom` 时，coordinator 用
     /// `global-hotkey` crate 注册此组合键（支持 Toggle + Hold 模式）。
     /// `None` 且 trigger == Custom 表示用户选了自定义但还没录制。
@@ -783,6 +789,12 @@ struct UserPreferencesWire {
     output_language_preference: OutputLanguagePreference,
     qa_hotkey: Option<ShortcutBinding>,
     qa_save_history: bool,
+    #[serde(default)]
+    qa_llm_provider: Option<String>,
+    #[serde(default)]
+    qa_llm_model: Option<String>,
+    #[serde(default)]
+    qa_llm_thinking_enabled: Option<bool>,
     custom_combo_hotkey: Option<ComboBinding>,
     translation_hotkey: Option<ShortcutBinding>,
     switch_style_hotkey: Option<ShortcutBinding>,
@@ -863,6 +875,9 @@ impl Default for UserPreferencesWire {
             output_language_preference: prefs.output_language_preference,
             qa_hotkey: prefs.qa_hotkey,
             qa_save_history: prefs.qa_save_history,
+            qa_llm_provider: prefs.qa_llm_provider,
+            qa_llm_model: prefs.qa_llm_model,
+            qa_llm_thinking_enabled: prefs.qa_llm_thinking_enabled,
             custom_combo_hotkey: prefs.custom_combo_hotkey,
             translation_hotkey: None,
             switch_style_hotkey: None,
@@ -942,6 +957,9 @@ impl<'de> Deserialize<'de> for UserPreferences {
             output_language_preference: wire.output_language_preference,
             qa_hotkey: wire.qa_hotkey,
             qa_save_history: wire.qa_save_history,
+            qa_llm_provider: wire.qa_llm_provider.filter(|s| !s.trim().is_empty()),
+            qa_llm_model: wire.qa_llm_model.filter(|s| !s.trim().is_empty()),
+            qa_llm_thinking_enabled: wire.qa_llm_thinking_enabled,
             custom_combo_hotkey: wire.custom_combo_hotkey,
             translation_hotkey: wire
                 .translation_hotkey
@@ -1636,6 +1654,9 @@ impl Default for UserPreferences {
             output_language_preference: OutputLanguagePreference::Auto,
             qa_hotkey: default_qa_hotkey(),
             qa_save_history: false,
+            qa_llm_provider: None,
+            qa_llm_model: None,
+            qa_llm_thinking_enabled: None,
             custom_combo_hotkey: None,
             translation_hotkey: default_translation_hotkey(),
             switch_style_hotkey: default_switch_style_hotkey(),

@@ -4,7 +4,7 @@
     <DirectoryRef Id="INSTALLDIR">
       <Directory Id="OpenLessImeDirectory" Name="windows-ime">
         <Directory Id="OpenLessImeX64Directory" Name="x64">
-          <Component Id="OpenLessImeDllX64Component" Guid="{B787DE6F-DF71-4D68-9DE8-04D3665A26F3}" Win64="yes">
+          <Component Id="OpenLessImeDllX64Component" Guid="{6C72BDEF-50EE-4A6D-9E4A-C345DAF3D434}" Win64="yes">
             <File Id="OpenLessImeDllX64" Name="OpenLessIme.dll" Source="src-tauri\target\windows-ime-msvc\x64\Release\OpenLessIme.dll" KeyPath="yes" />
           </Component>
         </Directory>
@@ -14,7 +14,7 @@
                SysWOW64\regsvr32 below. Mark the MSI component as 64-bit so
                WiX accepts it under the x64 INSTALLDIR; this does not change
                the architecture of the DLL payload. -->
-          <Component Id="OpenLessImeDllX86Component" Guid="{A2E61B9A-4034-4ABF-A42F-964A9B1F08BB}" Win64="yes">
+          <Component Id="OpenLessImeDllX86Component" Guid="{36544879-B9E1-40DE-99C4-2CD27E202783}" Win64="yes">
             <File Id="OpenLessImeDllX86" Name="OpenLessIme.dll" Source="src-tauri\target\windows-ime-msvc\x86\Release\OpenLessIme.dll" KeyPath="yes" />
           </Component>
         </Directory>

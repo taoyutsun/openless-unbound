@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$ExePath = "",
   [int]$TimeoutSeconds = 15
 )
@@ -14,7 +14,7 @@ if (-not (Test-Path $ExePath)) {
   throw "OpenLess executable not found: $ExePath"
 }
 
-$logPath = Join-Path $env:LOCALAPPDATA "OpenLess\Logs\openless.log"
+$logPath = Join-Path $env:LOCALAPPDATA "OpenLess Unbound\Logs\openless.log"
 Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
 Get-Process openless -ErrorAction SilentlyContinue | Stop-Process -Force
 

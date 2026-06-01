@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$ExePath = "",
   [int]$StartupTimeoutSeconds = 12,
   [switch]$RequireCredentials
@@ -23,7 +23,7 @@ function Test-CredentialValue($Value) {
 }
 
 function Get-OpenLessCredentialStatus {
-  $path = Join-Path $env:APPDATA "OpenLess\credentials.json"
+  $path = Join-Path $env:APPDATA "OpenLess Unbound\credentials.json"
   if (-not (Test-Path $path)) {
     return [pscustomobject]@{
       Path = $path
@@ -59,7 +59,7 @@ if (-not (Test-Path $ExePath)) {
   throw "OpenLess executable not found: $ExePath"
 }
 
-$logPath = Join-Path $env:LOCALAPPDATA "OpenLess\Logs\openless.log"
+$logPath = Join-Path $env:LOCALAPPDATA "OpenLess Unbound\Logs\openless.log"
 $credentialStatus = Get-OpenLessCredentialStatus
 
 Write-Host "== Credential status =="

@@ -17,12 +17,12 @@ BEGIN
   BEGIN
     BLOCK "040904b0"
     BEGIN
-      VALUE "CompanyName", "OpenLess"
-      VALUE "FileDescription", "OpenLess Voice Input TSF IME"
+      VALUE "CompanyName", "OpenLess Unbound"
+      VALUE "FileDescription", "OpenLess Unbound Voice Input TSF IME"
       VALUE "FileVersion", "0.1.0.0"
       VALUE "InternalName", "OpenLessIme.dll"
       VALUE "OriginalFilename", "OpenLessIme.dll"
-      VALUE "ProductName", "OpenLess Voice Input"
+      VALUE "ProductName", "OpenLess Unbound Voice Input"
       VALUE "ProductVersion", "0.1.0.0"
     END
   END

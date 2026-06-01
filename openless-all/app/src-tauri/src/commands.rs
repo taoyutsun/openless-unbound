@@ -1,4 +1,4 @@
-//! Tauri command surface — every IPC entry the React UI invokes lives here.
+﻿//! Tauri command surface — every IPC entry the React UI invokes lives here.
 
 use std::sync::Arc;
 
@@ -387,9 +387,13 @@ pub struct LatestBetaRelease {
 /// 返回 `Ok(None)` = 当前没发过 Beta 版；`Err(String)` = 网络/解析故障。
 #[tauri::command]
 pub async fn fetch_latest_beta_release() -> Result<Option<LatestBetaRelease>, String> {
+    if unbound_updater_disabled() {
+        return Ok(None);
+    }
+
     let resp = net::send_with_retry(|| {
         net::http()
-            .get("https://github.com/appergb/openless/releases.atom")
+            .get("https://github.com/taoyutsun/openless-unbound/releases.atom")
             .timeout(std::time::Duration::from_secs(15))
     })
     .await
@@ -426,7 +430,7 @@ fn parse_latest_beta_from_atom(body: &str) -> Option<LatestBetaRelease> {
         if !tag_name.ends_with("-beta-tauri") {
             continue;
         }
-        let html_url = format!("https://github.com/appergb/openless/releases/tag/{tag_name}");
+        let html_url = format!("https://github.com/taoyutsun/openless-unbound/releases/tag/{tag_name}");
         let published_at =
             extract_between(entry_body, "<updated>", "</updated>").unwrap_or_default();
         return Some(LatestBetaRelease {
@@ -484,6 +488,10 @@ pub async fn app_check_update_with_channel<R: tauri::Runtime>(
     timeout_ms: Option<u64>,
     channel: Option<UpdateChannel>,
 ) -> Result<Option<AppUpdateMetadata>, String> {
+    if unbound_updater_disabled() {
+        return Ok(None);
+    }
+
     use tauri_plugin_updater::UpdaterExt;
 
     let channel = channel.unwrap_or_else(|| coord.prefs().get().update_channel);
@@ -523,6 +531,10 @@ pub async fn app_check_update_with_channel<R: tauri::Runtime>(
 /// 顺序：先镜像（fastgit.cc 代理 GitHub），后直连 —— 跟 tauri.conf 现有 Stable
 /// endpoints 一致，让国内访问优先打到 CDN。
 async fn resolve_beta_manifest_endpoints() -> Result<Vec<url::Url>, String> {
+    if unbound_updater_disabled() {
+        return Err("OpenLess Unbound 尚未設定更新通道".to_string());
+    }
+
     let Some(latest) = fetch_latest_beta_release().await? else {
         return Err("尚未发布过 Beta 版本".to_string());
     };
@@ -530,16 +542,20 @@ async fn resolve_beta_manifest_endpoints() -> Result<Vec<url::Url>, String> {
     // {{target}} / {{arch}} 占位符由 plugin 在 check 时替换。Rust raw string 用 r#""#
     // 不需要转义双花括号，比 format! 干净。
     let mirror = format!(
-        "https://fastgit.cc/https://github.com/appergb/openless/releases/download/{tag}/latest-{{{{target}}}}-{{{{arch}}}}-beta-mirror.json"
+        "https://fastgit.cc/https://github.com/taoyutsun/openless-unbound/releases/download/{tag}/latest-{{{{target}}}}-{{{{arch}}}}-beta-mirror.json"
     );
     let direct = format!(
-        "https://github.com/appergb/openless/releases/download/{tag}/latest-{{{{target}}}}-{{{{arch}}}}-beta.json"
+        "https://github.com/taoyutsun/openless-unbound/releases/download/{tag}/latest-{{{{target}}}}-{{{{arch}}}}-beta.json"
     );
     let mirror_url =
         url::Url::parse(&mirror).map_err(|e| format!("parse beta mirror url: {e}"))?;
     let direct_url =
         url::Url::parse(&direct).map_err(|e| format!("parse beta direct url: {e}"))?;
     Ok(vec![mirror_url, direct_url])
+}
+
+fn unbound_updater_disabled() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1899,6 +1915,12 @@ pub fn qa_window_pin(coord: CoordinatorState<'_>, pinned: bool) {
     coord.qa_window_pin(pinned);
 }
 
+#[tauri::command]
+pub async fn qa_record_toggle(coord: CoordinatorState<'_>) -> Result<(), String> {
+    coord.qa_record_toggle().await;
+    Ok(())
+}
+
 // ─────────────────────────── 自定义组合键 ───────────────────────────
 
 /// 测试一个组合键是否可以注册（验证格式，不实际注册）。
@@ -2740,8 +2762,8 @@ fn emit_sherpa_prepare_progress(app: &AppHandle, payload: SherpaPrepareProgressP
 }
 
 /// 把当前会话的 openless.log 复制到用户选择的位置（前端用 plugin-dialog 拿 target_path）。
-/// 路径来自 lib::log_dir_path() —— mac: ~/Library/Logs/OpenLess/openless.log，
-/// windows: %LOCALAPPDATA%\OpenLess\Logs\openless.log。
+/// 路径来自 lib::log_dir_path() —— mac: ~/Library/Logs/OpenLess Unbound/openless.log，
+/// windows: %LOCALAPPDATA%\OpenLess Unbound\Logs\openless.log。
 #[tauri::command]
 pub fn export_error_log(target_path: String) -> Result<(), String> {
     let src = crate::log_dir_path().join("openless.log");
@@ -4308,13 +4330,13 @@ mod tests {
   <entry>
     <id>tag:github.com,2008:Repository/X/v1.2.23-tauri</id>
     <updated>2026-05-07T09:05:00Z</updated>
-    <link rel="alternate" type="text/html" href="https://github.com/appergb/openless/releases/tag/v1.2.23-tauri"/>
+    <link rel="alternate" type="text/html" href="https://github.com/taoyutsun/openless-unbound/releases/tag/v1.2.23-tauri"/>
     <title>OpenLess v1.2.23-tauri</title>
   </entry>
   <entry>
     <id>tag:github.com,2008:Repository/X/v1.2.24-2-beta-tauri</id>
     <updated>2026-05-08T01:27:23Z</updated>
-    <link rel="alternate" type="text/html" href="https://github.com/appergb/openless/releases/tag/v1.2.24-2-beta-tauri"/>
+    <link rel="alternate" type="text/html" href="https://github.com/taoyutsun/openless-unbound/releases/tag/v1.2.24-2-beta-tauri"/>
     <title>OpenLess v1.2.24-2-beta-tauri</title>
   </entry>
 </feed>"#;
@@ -4322,7 +4344,7 @@ mod tests {
         assert_eq!(got.tag_name, "v1.2.24-2-beta-tauri");
         assert_eq!(
             got.html_url,
-            "https://github.com/appergb/openless/releases/tag/v1.2.24-2-beta-tauri"
+            "https://github.com/taoyutsun/openless-unbound/releases/tag/v1.2.24-2-beta-tauri"
         );
         assert_eq!(got.published_at, "2026-05-08T01:27:23Z");
     }
@@ -4331,7 +4353,7 @@ mod tests {
     fn parse_latest_beta_from_atom_returns_none_when_only_stable_releases() {
         let body = r#"<feed>
   <entry>
-    <link rel="alternate" type="text/html" href="https://github.com/appergb/openless/releases/tag/v1.2.23-tauri"/>
+    <link rel="alternate" type="text/html" href="https://github.com/taoyutsun/openless-unbound/releases/tag/v1.2.23-tauri"/>
     <updated>2026-05-07T09:05:00Z</updated>
   </entry>
 </feed>"#;

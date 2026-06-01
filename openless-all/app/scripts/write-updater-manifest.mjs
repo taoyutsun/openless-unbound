@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const target = process.env.OPENLESS_UPDATE_TARGET;
 const arch = process.env.OPENLESS_UPDATE_ARCH;
-const repo = process.env.OPENLESS_UPDATE_REPO || 'appergb/openless';
+const repo = process.env.OPENLESS_UPDATE_REPO || 'taoyutsun/openless-unbound';
 const mirrorBaseUrl = process.env.OPENLESS_UPDATE_MIRROR_BASE_URL || 'https://fastgit.cc/https://github.com';
 // 渠道决定 manifest 文件名后缀：stable → 旧文件名（向后兼容）；beta → 加 -beta 后缀，
 // 让 stable 用户的 endpoint 永远拿不到 beta 包。空 / 未设置 = stable。

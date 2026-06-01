@@ -58,7 +58,7 @@ interface FloatingShellProps {
 export function FloatingShell({ os: osProp, initialTab = 'overview', initialSettings = false }: FloatingShellProps) {
   const os = osProp ?? detectOS();
   return (
-    <WindowChrome os={os} title="OpenLess" height="100%">
+    <WindowChrome os={os} title="OpenLess Unbound" height="100%">
       <FloatingShellBody os={os} initialTab={initialTab} initialSettings={initialSettings} />
     </WindowChrome>
   );
@@ -207,10 +207,10 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '2px 8px 12px' }}>
             <img
               src="AppIcon.png"
-              alt="OpenLess"
+              alt="OpenLess Unbound"
               style={{ width: 22, height: 22, borderRadius: 5, boxShadow: '0 1px 2px rgba(0,0,0,.1), 0 0 0 0.5px rgba(0,0,0,.06)' }} />
 
-            <div style={{ fontSize: 13.5, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ol-ink)' }}>OpenLess</div>
+            <div style={{ fontSize: 13.5, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ol-ink)' }}>OpenLess Unbound</div>
           </div>
 
           {/* nav — 滑动指示器：active pill 是 absolute 元素，currentTab 改变时 top/height

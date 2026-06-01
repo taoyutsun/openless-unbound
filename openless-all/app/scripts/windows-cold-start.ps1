@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$ExePath = "",
   [switch]$FreshBuild,
   [switch]$PreferDebug,
@@ -65,7 +65,7 @@ if (-not $env:ProgramData) {
   $env:ProgramData = Join-Path $env:SystemDrive "ProgramData"
 }
 
-$logPath = Join-Path $env:LOCALAPPDATA "OpenLess\Logs\openless.log"
+$logPath = Join-Path $env:LOCALAPPDATA "OpenLess Unbound\Logs\openless.log"
 $workingDirectory = Split-Path $ExePath -Parent
 
 Add-Type @"

@@ -33,8 +33,29 @@ video-materials/
 node_modules/
 dist/
 target/
+.artifacts/
+openless-all/app/.artifacts/
 .cargo/registry/
 .cargo/git/
+
+# Public fork safety: generated installers and updater manifests do not belong in git.
+*.msi
+*.exe
+*.dmg
+*.zip
+*.AppImage
+*.appimage
+*.deb
+*.rpm
+*.sig
+latest-*.json
+
+# Runtime user data / local credentials must never be committed.
+preferences.json
+history.json
+dictionary.json
+app.db
+auth.json
 
 # Windows TSF IME local build outputs
 openless-all/app/windows-ime/OpenLessIme/
@@ -45,6 +66,7 @@ openless-all/app/windows-ime/obj/
 
 # Planning docs are kept local only, not published to the public repo.
 docs/plans/
+PUBLISHING.md
 
 # Internal AI 协作 + 规划 + 审计文档：本地保留，绝不发布到公共仓库。
 # 之前误入库的整套已在 chore/remove-internal-docs 中 git rm --cached，

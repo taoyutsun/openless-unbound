@@ -2,9 +2,9 @@
 //! platform-backed credentials vault.
 //!
 //! Storage roots:
-//! - macOS:   `~/Library/Application Support/OpenLess`
-//! - Windows: `%APPDATA%\OpenLess`
-//! - Linux:   `$XDG_DATA_HOME/OpenLess` or `~/.local/share/OpenLess`
+//! - macOS:   `~/Library/Application Support/OpenLess Unbound`
+//! - Windows: `%APPDATA%\OpenLess Unbound`
+//! - Linux:   `$XDG_DATA_HOME/OpenLess Unbound` or `~/.local/share/OpenLess Unbound`
 //!
 //! Credential storage policy: provider credentials are stored in the OS
 //! credential vault (macOS Keychain, Windows Credential Manager, Linux keyring).
@@ -42,8 +42,9 @@ const CORRECTION_NUM_TOKEN: &str = "{num}";
 const VOCAB_PRESETS_FILE: &str = "vocab-presets.json";
 
 /// 旧版 plaintext JSON 凭据路径。仅作为迁移来源；成功写入系统凭据库后会删除。
-const LEGACY_CREDS_DIR: &str = ".openless";
+const LEGACY_CREDS_DIR: &str = ".openless-unbound";
 const LEGACY_CREDS_FILE: &str = "credentials.json";
+const APP_DATA_DIR_NAME: &str = "OpenLess Unbound";
 
 const KEYRING_CREDENTIALS_ACCOUNT: &str = "credentials.v1";
 const KEYRING_CREDENTIALS_CHUNK_PREFIX: &str = "credentials.v1.chunk.";
@@ -101,27 +102,27 @@ fn data_dir() -> Result<PathBuf> {
         Ok(PathBuf::from(home)
             .join("Library")
             .join("Application Support")
-            .join("OpenLess"))
+            .join(APP_DATA_DIR_NAME))
     }
 
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("APPDATA").context("APPDATA not set")?;
-        Ok(PathBuf::from(appdata).join("OpenLess"))
+        Ok(PathBuf::from(appdata).join(APP_DATA_DIR_NAME))
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
             if !xdg.is_empty() {
-                return Ok(PathBuf::from(xdg).join("OpenLess"));
+                return Ok(PathBuf::from(xdg).join(APP_DATA_DIR_NAME));
             }
         }
         let home = std::env::var("HOME").context("HOME not set")?;
         Ok(PathBuf::from(home)
             .join(".local")
             .join("share")
-            .join("OpenLess"))
+            .join(APP_DATA_DIR_NAME))
     }
 }
 
@@ -481,12 +482,12 @@ impl CredsLlmEntry {
 
 fn credentials_path() -> Result<PathBuf> {
     // macOS / Linux: ~/.openless/credentials.json (与 Swift 同源)
-    // Windows: %APPDATA%\OpenLess\credentials.json (Windows 没有标准 HOME 环境变量)
+    // Windows: %APPDATA%\OpenLess Unbound\credentials.json (Windows 没有标准 HOME 环境变量)
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("APPDATA").context("APPDATA not set")?;
         return Ok(PathBuf::from(appdata)
-            .join("OpenLess")
+            .join(APP_DATA_DIR_NAME)
             .join(LEGACY_CREDS_FILE));
     }
     #[cfg(not(target_os = "windows"))]
@@ -2192,12 +2193,19 @@ pub struct CredentialsSnapshot {
     pub ark_endpoint: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct LlmProviderCredentials {
+    pub api_key: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+}
+
 /// 凭据存储——系统凭据库；旧 JSON 文件只作为迁移来源。
 pub struct CredentialsVault;
 
 impl CredentialsVault {
     /// 系统凭据库 service name；macOS 下对应 Keychain service。
-    pub const SERVICE_NAME: &'static str = "com.openless.app";
+    pub const SERVICE_NAME: &'static str = "com.openless.unbound";
 
     pub fn get(account: CredentialAccount) -> Result<Option<String>> {
         let _guard = credentials_lock().lock();
@@ -2245,6 +2253,22 @@ impl CredentialsVault {
     pub fn get_active_llm() -> String {
         let _guard = credentials_lock().lock();
         load_credentials().active.llm
+    }
+
+    pub fn get_llm_provider_credentials(id: &str) -> Result<LlmProviderCredentials> {
+        let _guard = credentials_lock().lock();
+        let root = load_credentials();
+        let pick = |s: &Option<String>| s.as_ref().filter(|v| !v.trim().is_empty()).cloned();
+        Ok(root
+            .providers
+            .llm
+            .get(id)
+            .map(|entry| LlmProviderCredentials {
+                api_key: pick(&entry.apiKey),
+                model: pick(&entry.model),
+                base_url: pick(&entry.baseURL),
+            })
+            .unwrap_or_default())
     }
 
     pub fn snapshot() -> CredentialsSnapshot {

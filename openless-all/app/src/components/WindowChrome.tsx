@@ -167,7 +167,7 @@ function LinuxTitlebar() {
         zIndex: 50,
       }}
     >
-      <span style={{ color: 'var(--ol-ink-2)' }}>OpenLess</span>
+      <span style={{ color: 'var(--ol-ink-2)' }}>OpenLess Unbound</span>
       <div
         style={{ display: 'flex', gap: 4, pointerEvents: 'auto' }}
         onMouseDown={(e) => e.stopPropagation()}

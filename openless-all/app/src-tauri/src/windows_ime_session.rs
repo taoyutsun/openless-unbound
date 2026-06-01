@@ -125,7 +125,7 @@ impl WindowsImeSessionController {
     ) -> Result<InsertStatus, WindowsImeSessionError> {
         if !prepared.is_ready_for_tsf_submit() {
             return Err(WindowsImeSessionError::Ipc(
-                "OpenLess IME session is not active".to_string(),
+                "OpenLess Unbound IME session is not active".to_string(),
             ));
         }
 
@@ -219,7 +219,7 @@ mod tests {
             .await;
 
         assert!(
-            matches!(result, Err(WindowsImeSessionError::Ipc(message)) if message == "OpenLess IME session is not active")
+            matches!(result, Err(WindowsImeSessionError::Ipc(message)) if message == "OpenLess Unbound IME session is not active")
         );
     }
 
