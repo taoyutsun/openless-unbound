@@ -55,7 +55,10 @@ use tauri::menu::{
     CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, Submenu, SubmenuBuilder,
 };
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, RunEvent, Runtime};
+use tauri::{
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize,
+    RunEvent, Runtime,
+};
 
 use crate::types::PolishMode;
 
@@ -1266,17 +1269,89 @@ fn show_qa_window_no_activate<R: tauri::Runtime>(window: &tauri::WebviewWindow<R
     true
 }
 
+/// 输入目标显示器的物理矩形（虚拟桌面坐标）+ DPI 缩放。
+#[cfg(target_os = "windows")]
+pub(crate) struct ForegroundMonitor {
+    pub(crate) left: i32,
+    pub(crate) top: i32,
+    pub(crate) right: i32,
+    pub(crate) bottom: i32,
+    /// 该显示器的有效 DPI 缩放（1.0 = 96dpi）。
+    pub(crate) scale: f64,
+}
+
+/// 用 Win32 定位「当前前台窗口（= 用户正在输入的 App）」所在的显示器。
+/// 多显示器下用它把胶囊摆到「正在输入的那块屏」。`window.current_monitor()`
+/// 返回的是胶囊窗口自己所在的显示器，因此不能用它来跟随输入位置。
+#[cfg(target_os = "windows")]
+pub(crate) fn foreground_window_monitor() -> Option<ForegroundMonitor> {
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+    use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        let hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if hmon.is_invalid() {
+            return None;
+        }
+        let mut mi = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if !GetMonitorInfoW(hmon, &mut mi).as_bool() {
+            return None;
+        }
+        let mut dpi_x: u32 = 96;
+        let mut dpi_y: u32 = 96;
+        // 取不到时退回 96dpi 继续，不让定位整体失败。
+        let _ = GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y);
+        Some(ForegroundMonitor {
+            left: mi.rcMonitor.left,
+            top: mi.rcMonitor.top,
+            right: mi.rcMonitor.right,
+            bottom: mi.rcMonitor.bottom,
+            scale: (dpi_x as f64 / 96.0).max(0.1),
+        })
+    }
+}
+
 /// 把 capsule 窗口移到屏幕底部居中，与 Swift `CapsuleWindowController.repositionToBottomCenter` 同效。
 /// 留 80pt 给 macOS Dock；Windows 任务栏一般在底部 48pt 以内，整体也合适。
 pub(crate) fn position_capsule_bottom_center<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     translation_active: bool,
 ) -> tauri::Result<()> {
+    let bounds = capsule_window_bounds(translation_active);
+
+    // Windows：跟随「正在输入的 App」所在显示器摆放，避免多显示器下胶囊
+    // 总是固定出现在主屏 / 胶囊自己那块屏。
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(mon) = foreground_window_monitor() {
+            let scale = mon.scale;
+            let phys_w = (bounds.width * scale).round() as i32;
+            let phys_h = (bounds.height * scale).round() as i32;
+            window.set_size(PhysicalSize::new(phys_w.max(1) as u32, phys_h.max(1) as u32))?;
+
+            let mon_w = mon.right - mon.left;
+            let x = mon.left + ((mon_w - phys_w) / 2).max(0);
+            // 与既有行为一致：「距底部 visual高度 + 80 + inset」，按 physical px 计算。
+            let offset_from_bottom =
+                (capsule_visual_height(translation_active) + 80.0 + bounds.bottom_inset) * scale;
+            let y = ((mon.bottom as f64) - offset_from_bottom).round() as i32;
+            window.set_position(PhysicalPosition::new(x, y.max(mon.top)))?;
+            return Ok(());
+        }
+        // 仅当 Win32 取不到前台显示器时，落回下面的 current_monitor 逻辑。
+    }
+
     let monitor = match window.current_monitor()? {
         Some(m) => m,
         None => return Ok(()),
     };
-    let bounds = capsule_window_bounds(translation_active);
     window.set_size(LogicalSize::new(bounds.width, bounds.height))?;
 
     let scale = monitor.scale_factor();

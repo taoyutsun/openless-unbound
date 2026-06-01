@@ -5202,21 +5202,52 @@ struct CapsuleLayoutState {
     scale_bits: u64,
 }
 
-fn maybe_position_capsule_bottom_center<R: tauri::Runtime>(
-    inner: &Arc<Inner>,
+/// 返回胶囊「应该摆放到的显示器」的标识信息。
+///
+/// 它看的显示器必须和 `position_capsule_bottom_center` 实际定位用的一致：
+/// Windows 看「正在输入的 App 所在显示器」，其它平台看胶囊自己的显示器。
+/// 这是「是否需要重新定位」去重缓存（`maybe_position_capsule_bottom_center`）
+/// 的 key，如果这里看错了显示器，就会出现「输入焦点移到另一块屏、胶囊却没
+/// 跟过去」的 bug。
+fn capsule_layout_snapshot<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     translation_active: bool,
-) {
-    let Some(monitor) = window.current_monitor().ok().flatten() else {
-        return;
-    };
-    let next = CapsuleLayoutState {
+) -> Option<CapsuleLayoutState> {
+    // Windows：以「正在输入的 App 所在显示器」为基准。若用胶囊自己的
+    // current_monitor，输入焦点切到另一块屏时胶囊仍在原屏 → 误判「没变化」
+    // → 跳过重新定位。
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(mon) = crate::foreground_window_monitor() {
+            return Some(CapsuleLayoutState {
+                translation_active,
+                monitor_x: mon.left,
+                monitor_y: mon.top,
+                monitor_width: (mon.right - mon.left).max(0) as u32,
+                monitor_height: (mon.bottom - mon.top).max(0) as u32,
+                scale_bits: mon.scale.to_bits(),
+            });
+        }
+        // 仅当 Win32 取不到前台显示器时，落回下面的 current_monitor。
+    }
+    let monitor = window.current_monitor().ok().flatten()?;
+    Some(CapsuleLayoutState {
         translation_active,
         monitor_x: monitor.position().x,
         monitor_y: monitor.position().y,
         monitor_width: monitor.size().width,
         monitor_height: monitor.size().height,
         scale_bits: monitor.scale_factor().to_bits(),
+    })
+}
+
+fn maybe_position_capsule_bottom_center<R: tauri::Runtime>(
+    inner: &Arc<Inner>,
+    window: &tauri::WebviewWindow<R>,
+    translation_active: bool,
+) {
+    let Some(next) = capsule_layout_snapshot(window, translation_active) else {
+        return;
     };
     {
         let last = inner.capsule_layout.lock();
