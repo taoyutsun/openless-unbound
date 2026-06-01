@@ -163,3 +163,53 @@ a { color: inherit; text-decoration: none; }
   opacity: 0.32;
   pointer-events: none;
 }
+
+/* ── Linux no-compositing fallback ──────────────────────────────────────
+   WEBKIT_DISABLE_COMPOSITING_MODE=1 时 backdrop-filter 不可用，用噪点纹理
+   替代磨砂效果。data-ol-no-compositing 由 App.tsx 在初始化时设置。
+
+   !important 是因为三处目标的 backdrop-filter / background 均为 inline style
+   （WindowChrome.tsx / FloatingShell.tsx 的 style={...}），CSS class 必须
+   用 !important 才能覆盖。 */
+
+[data-ol-no-compositing] .ol-winchrome {
+  position: relative;
+  isolation: isolate;
+  /* !important 覆盖 WindowChrome.tsx inline backdropFilter */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  /* 提高透明梯度不透明度，补偿缺少模糊的视觉深度
+     注意：此三层的渐变参数与 WindowChrome.tsx 的 inline background 同步，
+     改动那边时请同步更新这里。 */
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 60%),
+    radial-gradient(100% 70% at 100% 100%, rgba(37,99,235,0.07) 0%, rgba(37,99,235,0) 55%),
+    linear-gradient(180deg, rgba(245,245,247,0.96) 0%, rgba(232,232,236,0.96) 100%) !important;
+}
+
+[data-ol-no-compositing] .ol-winchrome::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  /* 灰阶噪点颗粒，低 opacity 模拟磨砂质感 */
+  background-image: var(--ol-frost-grain);
+  background-size: 100px 100px;
+  opacity: 0.20;
+  pointer-events: none;
+}
+
+[data-ol-no-compositing] .ol-console-main {
+  /* !important 覆盖 FloatingShell.tsx inline backdropFilter */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(255, 255, 255, 0.80) !important;
+}
+
+[data-ol-no-compositing] .ol-linux-titlebar {
+  /* !important 覆盖 WindowChrome.tsx LinuxTitlebar inline backdropFilter */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(245, 245, 247, 0.95) !important;
+}

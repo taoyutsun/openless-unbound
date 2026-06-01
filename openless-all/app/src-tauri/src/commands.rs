@@ -3545,6 +3545,12 @@ pub async fn github_device_flow_poll(
     Ok(GithubDevicePollResult::Error { message: msg })
 }
 
+#[tauri::command]
+pub fn is_no_compositing_mode() -> bool {
+    // Linux WebKitGTK: WEBKIT_DISABLE_COMPOSITING_MODE=1 时 backdrop-filter 不可用
+    std::env::var("WEBKIT_DISABLE_COMPOSITING_MODE").as_deref() == Ok("1")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

@@ -324,6 +324,7 @@ function FloatingShellBody({ os, initialTab, initialSettings }: { os: OS; initia
             一起坐在 WindowChrome 的磨砂底板上，整体一块连续玻璃。 */}
         <div style={{ flex: 1, minWidth: 0, padding: '4px 8px 6px 0', display: 'flex' }}>
           <main
+            className="ol-console-main"
             style={{
               flex: 1, minWidth: 0,
               overflow: 'hidden',

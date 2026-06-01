@@ -40,6 +40,9 @@ export function WindowChrome({
   // 三个平台共用半透明玻璃 background + backdropFilter。
   // macOS: NSVisualEffectView 提供材质；Windows: Tauri apply_mica 提供 Mica；
   // Linux: decorations:false 后 CSS 磨砂玻璃自成背景。
+  //
+  // 注意：三层渐变的参数与 global.css 中 [data-ol-no-compositing] .ol-winchrome
+  // 的回退 background 同步（只 opacity 从 0.92 提到 0.96）。改这里时请同步更新 CSS。
   const background = `
     radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 60%),
     radial-gradient(100% 70% at 100% 100%, rgba(37,99,235,0.07) 0%, rgba(37,99,235,0) 55%),
@@ -48,6 +51,7 @@ export function WindowChrome({
 
   return (
     <div
+      className="ol-winchrome"
       style={{
         '--ol-window-shell-radius': `${shellRadius}px`,
         '--ol-window-console-radius': `${consoleRadius}px`,
@@ -148,6 +152,7 @@ function LinuxTitlebar() {
   return (
     <div
       data-tauri-drag-region
+      className="ol-linux-titlebar"
       style={{
         height: LINUX_TITLEBAR_HEIGHT,
         flexShrink: 0,
