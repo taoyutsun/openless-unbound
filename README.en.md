@@ -21,6 +21,7 @@ This fork keeps that foundation and focuses on practical constraints we ran into
 
 - Selection Q&A no longer requires Volcengine ASR credentials; it follows the active ASR provider.
 - Selection Q&A can use its own answer model instead of being tightly coupled to the general polishing model.
+- Selection Q&A answers can be partially selected manually, or copied as a whole with the copy button.
 - Codex OAuth, custom OpenAI-compatible endpoints, and other LLM routes can be used according to speed, quality, and cost.
 - The Windows TSF profile is registered as Traditional Chinese Taiwan to reduce accidental switching to Simplified Chinese input.
 - The app uses its own identity and data directory, so it can coexist with upstream OpenLess during testing.
@@ -101,9 +102,10 @@ If the target language is disabled, Shift does nothing. If translation fails, th
 2. Select text in any app.
 3. Press Right Ctrl to record, then press it again to submit.
 4. Press Right Ctrl again for follow-up questions.
-5. Press Esc to close the panel and clear the temporary context.
+5. Select part of an answer manually, or use the copy button to copy the whole assistant answer.
+6. Press Esc to close the panel and clear the temporary context.
 
-Selection Q&A does not provide a built-in browser or live search tool. If a model says it cannot look up live information, that is a provider / model capability limit rather than a hotkey or panel failure.
+Selection Q&A does not provide a built-in browser, live search, or external tool-calling flow. It is meant for explaining, rewriting, summarizing, and asking follow-up questions about the selected text; it does not look up current exchange rates, weather, or news in real time.
 
 ## Windows IME Notes
 
