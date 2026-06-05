@@ -274,6 +274,13 @@ function Copy-WindowsArtifacts {
   $webView2Loader = Get-ChildItem -Path (Join-Path $releaseRoot "build") -Recurse -Filter "WebView2Loader.dll" -ErrorAction SilentlyContinue |
     Where-Object { $_.FullName -match "\\out\\x64\\WebView2Loader\.dll$" } |
     Select-Object -First 1
+  $runtimeDlls = @(Get-ChildItem -LiteralPath $releaseRoot -File -Filter "*.dll" -ErrorAction SilentlyContinue)
+  $requiredRuntimeDlls = @(
+    "onnxruntime.dll",
+    "onnxruntime_providers_shared.dll",
+    "sherpa-onnx-c-api.dll",
+    "sherpa-onnx-cxx-api.dll"
+  )
 
   if (-not (Test-Path $msiPath)) {
     throw "MSI not found: $msiPath"
@@ -283,6 +290,11 @@ function Copy-WindowsArtifacts {
   }
   if ($null -eq $webView2Loader) {
     throw "WebView2Loader.dll x64 not found under $releaseRoot\build"
+  }
+  foreach ($requiredRuntimeDll in $requiredRuntimeDlls) {
+    if (-not ($runtimeDlls | Where-Object { $_.Name -eq $requiredRuntimeDll })) {
+      throw "Runtime DLL not found for portable package: $releaseRoot\$requiredRuntimeDll"
+    }
   }
   if ([string]::IsNullOrWhiteSpace($env:OPENLESS_IME_DLL_X64) -or -not (Test-Path $env:OPENLESS_IME_DLL_X64)) {
     throw "x64 OpenLessIme.dll not found for portable package: $env:OPENLESS_IME_DLL_X64"
@@ -304,6 +316,9 @@ function Copy-WindowsArtifacts {
   New-Item -ItemType Directory -Force -Path $portableImeX86Root | Out-Null
   Copy-Item -LiteralPath $exePath -Destination (Join-Path $portableRoot "openless.exe") -Force
   Copy-Item -LiteralPath $webView2Loader.FullName -Destination (Join-Path $portableRoot "WebView2Loader.dll") -Force
+  foreach ($runtimeDll in $runtimeDlls) {
+    Copy-Item -LiteralPath $runtimeDll.FullName -Destination (Join-Path $portableRoot $runtimeDll.Name) -Force
+  }
   Copy-Item -LiteralPath $env:OPENLESS_IME_DLL_X64 -Destination (Join-Path $portableImeX64Root "OpenLessIme.dll") -Force
   Copy-Item -LiteralPath $env:OPENLESS_IME_DLL_X86 -Destination (Join-Path $portableImeX86Root "OpenLessIme.dll") -Force
 

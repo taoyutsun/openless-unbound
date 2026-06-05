@@ -54,6 +54,10 @@ const requiredFragments = [
   "openless-ime.wixobj",
   "locale.wxl",
   "WebView2Loader.dll",
+  "onnxruntime.dll",
+  "onnxruntime_providers_shared.dll",
+  "sherpa-onnx-c-api.dll",
+  "sherpa-onnx-cxx-api.dll",
   "Compress-Archive",
   "Get-FileHash -Algorithm SHA256",
 ];
@@ -72,6 +76,8 @@ assert.doesNotMatch(script, /WixTools314/, "MSVC packaging must not hard-code a 
 assert.doesNotMatch(ciWorkflow, /WixTools314/, "CI MSI repair must not hard-code a single Tauri WiX tools version");
 assert.match(script, /-Filter "WixTools\*"/, "MSVC packaging should discover Tauri WiX tools by WixTools* glob");
 assert.match(ciWorkflow, /WixTools\*\\light\.exe/, "CI MSI repair should discover Tauri WiX tools by WixTools* glob");
+assert.match(script, /\$runtimeDlls = @\(Get-ChildItem -LiteralPath \$releaseRoot -File -Filter "\*\.dll"/, "portable package should collect runtime DLLs from the release directory");
+assert.match(script, /foreach \(\$runtimeDll in \$runtimeDlls\) \{[\s\S]*Copy-Item -LiteralPath \$runtimeDll\.FullName -Destination \(Join-Path \$portableRoot \$runtimeDll\.Name\)/, "portable package should include release runtime DLLs beside openless.exe");
 
 assert.match(imeBuild, /\[string\]\$OutputDirectory/, "IME build should support a package-specific output directory");
 assert.match(imeBuild, /\[string\]\$IntermediateDirectory/, "IME build should support a package-specific intermediate directory");
