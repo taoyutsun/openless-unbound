@@ -621,7 +621,7 @@ export const zhCN = {
         asrBailian: '阿里云百炼实时 ASR',
         asrSiliconflow: '硅基流动 SenseVoice',
         asrZhipu: '智谱 GLM-ASR',
-        asrGroq: 'Groq Whisper-large-v3',
+        asrGroq: 'Groq',
         asrWhisper: 'OpenAI Whisper（兼容）',
         asrSherpaOnnxLocal: '本地 sherpa-onnx（实验性）',
         asrFoundryLocalWhisper: '本地 Whisper（Foundry Local）',

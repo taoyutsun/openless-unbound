@@ -625,7 +625,7 @@ export const ja: typeof zhCN = {
         asrBailian: 'Alibaba Bailian リアルタイム ASR',
         asrSiliconflow: 'SiliconFlow SenseVoice',
         asrZhipu: 'Zhipu GLM-ASR',
-        asrGroq: 'Groq Whisper-large-v3',
+        asrGroq: 'Groq',
         asrWhisper: 'OpenAI Whisper（互換）',
         asrSherpaOnnxLocal: 'ローカル sherpa-onnx（実験的）',
         asrFoundryLocalWhisper: 'ローカル Whisper（Foundry Local）',

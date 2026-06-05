@@ -625,7 +625,7 @@ export const ko: typeof zhCN = {
         asrBailian: 'Alibaba Bailian 실시간 ASR',
         asrSiliconflow: 'SiliconFlow SenseVoice',
         asrZhipu: 'Zhipu GLM-ASR',
-        asrGroq: 'Groq Whisper-large-v3',
+        asrGroq: 'Groq',
         asrWhisper: 'OpenAI Whisper(호환)',
         asrSherpaOnnxLocal: '로컬 sherpa-onnx(실험적)',
         asrFoundryLocalWhisper: '로컬 Whisper(Foundry Local)',

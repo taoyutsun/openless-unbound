@@ -623,7 +623,7 @@ export const en: typeof zhCN = {
         asrBailian: 'Alibaba Bailian realtime ASR',
         asrSiliconflow: 'SiliconFlow SenseVoice',
         asrZhipu: 'Zhipu GLM-ASR',
-        asrGroq: 'Groq Whisper-large-v3',
+        asrGroq: 'Groq',
         asrWhisper: 'OpenAI Whisper (compatible)',
         asrSherpaOnnxLocal: 'Local sherpa-onnx (experimental)',
         asrFoundryLocalWhisper: 'Local Whisper (Foundry Local)',

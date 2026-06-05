@@ -623,7 +623,7 @@ export const zhTW: typeof zhCN = {
         asrBailian: '阿里雲百煉即時 ASR',
         asrSiliconflow: '硅基流動 SenseVoice',
         asrZhipu: '智譜 GLM-ASR',
-        asrGroq: 'Groq Whisper-large-v3',
+        asrGroq: 'Groq',
         asrWhisper: 'OpenAI Whisper（兼容）',
         asrSherpaOnnxLocal: '本地 sherpa-onnx（實驗性）',
         asrFoundryLocalWhisper: '本地 Whisper（Foundry Local）',
