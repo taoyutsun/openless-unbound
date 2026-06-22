@@ -251,6 +251,8 @@ export const ko: typeof zhCN = {
     desc: '로컬에 저장된 인식 기록.',
     filterAll: '전체',
     summary: '총 {{total}}건 · 표시 {{shown}}',
+    searchPlaceholder: '기록 검색…（{{shortcut}}）',
+    searchNoMatch: '“{{query}}”과(와) 일치하는 항목이 없습니다.',
     empty: '기록이 없습니다. {{trigger}} 를 눌러 한 번 녹음해 보세요.',
     loadFailed: '기록 로드 실패: {{err}}',
     retry: '다시 시도',

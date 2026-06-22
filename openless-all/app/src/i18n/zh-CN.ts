@@ -247,6 +247,8 @@ export const zhCN = {
     desc: '本机保存的识别记录。',
     filterAll: '全部',
     summary: '共 {{total}} 条 · 显示 {{shown}}',
+    searchPlaceholder: '搜索转写内容…（{{shortcut}}）',
+    searchNoMatch: '没有匹配「{{query}}」的记录。',
     empty: '还没有历史记录。按 {{trigger}} 录一段试试。',
     loadFailed: '加载历史失败：{{err}}',
     retry: '重试',

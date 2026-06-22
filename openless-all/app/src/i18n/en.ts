@@ -249,6 +249,8 @@ export const en: typeof zhCN = {
     desc: 'Locally stored transcripts.',
     filterAll: 'All',
     summary: '{{total}} total · showing {{shown}}',
+    searchPlaceholder: 'Search transcripts… ({{shortcut}})',
+    searchNoMatch: 'No entries match “{{query}}”.',
     empty: 'No history yet. Press {{trigger}} to record one.',
     loadFailed: 'Failed to load history: {{err}}',
     retry: 'Retry',

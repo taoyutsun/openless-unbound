@@ -249,6 +249,8 @@ export const zhTW: typeof zhCN = {
     desc: '本機保存的識別記錄。',
     filterAll: '全部',
     summary: '共 {{total}} 條 · 顯示 {{shown}}',
+    searchPlaceholder: '搜尋轉寫內容…（{{shortcut}}）',
+    searchNoMatch: '沒有符合「{{query}}」的記錄。',
     empty: '還沒有歷史記錄。按 {{trigger}} 錄一段試試。',
     loadFailed: '加載歷史失敗：{{err}}',
     retry: '重試',

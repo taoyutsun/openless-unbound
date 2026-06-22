@@ -8,6 +8,7 @@
 // 不在此弹窗出现。
 
 import { useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
 import { SavedToast } from './SavedToast';
@@ -70,11 +71,15 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection }: Sett
     setPillRect({ top: el.offsetTop, height: el.offsetHeight });
   }, [section]);
 
-  return (
+  // issue #580：用 Portal 渲染到 document.body，脱离页面 overflow:hidden 容器的
+  // stacking context。否则 WebKitGTK（Debian/KDE Wayland）下页面自绘滚动条
+  // (.ol-thinscroll) 不创建独立合成层，z-index 无法隔离，滚动时会盖在弹窗之上。
+  // 配合 position:fixed 覆盖整窗。
+  return createPortal(
     <div
       onClick={onClose}
       style={{
-        position: 'absolute', inset: 0,
+        position: 'fixed', inset: 0,
         background: 'rgba(15,17,22,0.32)',
         backdropFilter: 'blur(8px) saturate(140%)',
         WebkitBackdropFilter: 'blur(8px) saturate(140%)',
@@ -206,7 +211,8 @@ export function SettingsModal({ os: _os, onClose, initialSettingsSection }: Sett
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

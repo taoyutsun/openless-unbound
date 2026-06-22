@@ -251,6 +251,8 @@ export const ja: typeof zhCN = {
     desc: 'ローカルに保存された認識記録。',
     filterAll: 'すべて',
     summary: '合計 {{total}} 件 · 表示 {{shown}}',
+    searchPlaceholder: '文字起こしを検索…（{{shortcut}}）',
+    searchNoMatch: '「{{query}}」に一致する項目はありません。',
     empty: '履歴がありません。{{trigger}} を押して録音してみましょう。',
     loadFailed: '履歴の読み込みに失敗：{{err}}',
     retry: '再試行',

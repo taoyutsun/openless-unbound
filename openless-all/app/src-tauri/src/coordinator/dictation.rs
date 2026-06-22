@@ -352,10 +352,10 @@ where
 
 fn finalize_polished_text(
     polished: String,
-    translation_active: bool,
+    _translation_active: bool,
     _raw_uses_llm: bool,
-    mode: PolishMode,
-    polish_error: &Option<String>,
+    _mode: PolishMode,
+    _polish_error: &Option<String>,
     chinese_script_preference: crate::types::ChineseScriptPreference,
     correction_rules: &[crate::types::CorrectionRule],
     already_streamed: bool,
@@ -363,16 +363,10 @@ fn finalize_polished_text(
     if already_streamed {
         return polished;
     }
-    let should_force_script = if translation_active {
-        polish_error.is_some()
-    } else {
-        mode == PolishMode::Raw || polish_error.is_some()
-    };
-    let polished = if should_force_script {
-        apply_chinese_script_preference(&polished, chinese_script_preference)
-    } else {
-        polished
-    };
+    // Non-Auto script preferences must be enforced after LLM polish, because
+    // prompt-only instructions do not reliably prevent Simplified/Traditional
+    // mixing across providers. Auto remains a no-op in apply_chinese_script_preference.
+    let polished = apply_chinese_script_preference(&polished, chinese_script_preference);
     if correction_rules.is_empty() {
         polished
     } else {
@@ -393,8 +387,14 @@ fn streaming_insert_eligible(
     translation_active: bool,
     mode: PolishMode,
     raw_uses_llm: bool,
+    chinese_script_preference: crate::types::ChineseScriptPreference,
 ) -> bool {
-    streaming_insert_enabled && !translation_active && (mode != PolishMode::Raw || raw_uses_llm)
+    streaming_insert_enabled
+        && !translation_active
+        && (mode != PolishMode::Raw || raw_uses_llm)
+        // Forced script conversion must happen before insertion. Streaming inserts
+        // text incrementally, so it cannot safely rewrite already-inserted output.
+        && chinese_script_preference == crate::types::ChineseScriptPreference::Auto
 }
 
 fn default_done_message(status: InsertStatus, polish_failed: bool) -> Option<String> {
@@ -1596,6 +1596,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         translation_active,
         mode,
         raw_uses_llm,
+        chinese_script_preference,
     );
     log::info!(
         "[coord] polish dispatch: translation={translation_active} mode={mode:?} streaming_eligible={streaming_eligible}"
@@ -2000,7 +2001,45 @@ mod tests {
             false,
             PolishMode::Light,
             false,
+            crate::types::ChineseScriptPreference::Auto,
         ));
+    }
+
+    #[test]
+    fn streaming_insert_ineligible_when_chinese_script_forced() {
+        for pref in [
+            crate::types::ChineseScriptPreference::Traditional,
+            crate::types::ChineseScriptPreference::Simplified,
+        ] {
+            assert!(!streaming_insert_eligible(
+                true,
+                false,
+                PolishMode::Light,
+                false,
+                pref,
+            ));
+        }
+    }
+
+    #[test]
+    fn finalize_forces_traditional_even_on_successful_polish() {
+        let cases = [
+            ("你知道你今天想要做什么吗？", "你知道你今天想要做什麼嗎？"),
+            ("所以你已经考过了吗？", "所以你已經考過了嗎？"),
+        ];
+        for (input, expected) in cases {
+            let out = finalize_polished_text(
+                input.to_string(),
+                false,
+                true,
+                PolishMode::Light,
+                &None,
+                crate::types::ChineseScriptPreference::Traditional,
+                &[],
+                false,
+            );
+            assert_eq!(out, expected);
+        }
     }
 
     #[test]

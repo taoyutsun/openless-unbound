@@ -1,7 +1,7 @@
 ﻿// History.tsx — 接 Tauri 后端 list_history / delete_history_entry / clear_history。
 // 真实数据来自 ~/Library/Application Support/OpenLess Unbound/history.json。
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../components/Icon';
 import { detectOS } from '../components/WindowChrome';
@@ -38,6 +38,9 @@ export function History() {
   const FILTERS = useFilters();
   const MODE_LABEL = useModeLabel();
   const [filter, setFilter] = useState<'all' | PolishMode>('all');
+  // issue #612：历史页顶部原为静态 div，只显示统计、不可输入。改为真实搜索框。
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<DictationSession[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -80,10 +83,29 @@ export function History() {
     void refresh();
   }, [refresh]);
 
-  const filtered = useMemo(
-    () => (filter === 'all' ? items : items.filter(s => s.mode === filter)),
-    [items, filter],
-  );
+  // ⌘K / Ctrl+K 聚焦搜索框（issue #612 验收可选项）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const filtered = useMemo(() => {
+    const byMode = filter === 'all' ? items : items.filter(s => s.mode === filter);
+    const q = query.trim().toLowerCase();
+    if (!q) return byMode;
+    return byMode.filter(
+      s =>
+        s.finalText.toLowerCase().includes(q) ||
+        s.rawTranscript.toLowerCase().includes(q) ||
+        (s.appName ?? '').toLowerCase().includes(q),
+    );
+  }, [items, filter, query]);
   const item = useMemo(
     () => filtered.find(s => s.id === selectedId) || filtered[0],
     [filtered, selectedId],
@@ -181,12 +203,26 @@ export function History() {
           <div style={{ padding: '12px 14px', borderBottom: '0.5px solid var(--ol-line)' }}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '6px 10px', fontSize: 12,
+              padding: '6px 10px',
               border: '0.5px solid var(--ol-line-strong)', borderRadius: 8,
               background: 'var(--ol-surface-2)', color: 'var(--ol-ink-3)',
             }}>
               <Icon name="search" size={12} />
-              <span style={{ flex: 1 }}>{t('history.summary', { total: items.length, shown: filtered.length })}</span>
+              <input
+                ref={searchRef}
+                type="search"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder={t('history.searchPlaceholder', { shortcut: os === 'mac' ? '⌘K' : 'Ctrl+K' })}
+                style={{
+                  flex: 1, minWidth: 0, outline: 'none', border: 0,
+                  background: 'transparent', fontSize: 12, color: 'var(--ol-ink-2)',
+                  fontFamily: 'inherit',
+                }}
+              />
+            </div>
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--ol-ink-4)' }}>
+              {t('history.summary', { total: items.length, shown: filtered.length })}
             </div>
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 10 }}>
               {FILTERS.map(f => (
@@ -220,7 +256,9 @@ export function History() {
             )}
             {!loading && !loadError && filtered.length === 0 && (
               <div style={{ padding: 16, fontSize: 12, color: 'var(--ol-ink-4)' }}>
-                {t('history.empty', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : '' })}
+                {query.trim()
+                  ? t('history.searchNoMatch', { query: query.trim() })
+                  : t('history.empty', { trigger: prefs ? formatComboLabel(prefs.dictationHotkey) : '' })}
               </div>
             )}
             {!loadError && filtered.map(s => (
