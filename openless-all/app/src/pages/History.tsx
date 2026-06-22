@@ -47,6 +47,7 @@ export function History() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [justCopied, setJustCopied] = useState(false);
+  const [exportedRecordingId, setExportedRecordingId] = useState<string | null>(null);
   const [retranscribing, setRetranscribing] = useState(false);
   // 录音文件 lazily-detected missing 状态：retention / 条数 cap 清理后磁盘上 wav
   // 可能已被删，但 history 条目 hasAudioRecording 仍写 true。任一组件
@@ -158,6 +159,7 @@ export function History() {
 
   const onExportAudio = async () => {
     if (!item || !item.hasAudioRecording) return;
+    const exportedId = item.id;
     try {
       const bytes = await readAudioRecording(item.id);
       if (bytes.byteLength === 0) throw new Error('empty recording');
@@ -174,6 +176,10 @@ export function History() {
       // 浏览器异步触发下载，立刻 revoke 偶尔被中断；延后 60s 兜底。
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
       setActionError(null);
+      setExportedRecordingId(exportedId);
+      window.setTimeout(() => {
+        setExportedRecordingId(current => (current === exportedId ? null : current));
+      }, 1500);
     } catch (error) {
       console.error('[history] failed to export recording', error);
       const msg = errorMessage(error);
@@ -325,7 +331,9 @@ export function History() {
                 <div style={{ display: 'flex', gap: 6 }}>
                   <Btn icon={justCopied ? 'check' : 'copy'} variant="ghost" size="sm" onClick={() => void onCopy()}>{justCopied ? t('common.copied') : t('common.copy')}</Btn>
                   {item.hasAudioRecording && !audioMissingIds.has(item.id) && (
-                    <Btn icon="download" variant="ghost" size="sm" onClick={() => void onExportAudio()}>{t('history.exportRecording')}</Btn>
+                    <Btn icon={exportedRecordingId === item.id ? 'check' : 'download'} variant="ghost" size="sm" onClick={() => void onExportAudio()}>
+                      {exportedRecordingId === item.id ? t('history.exportedRecording') : t('history.exportRecording')}
+                    </Btn>
                   )}
                   {item.hasAudioRecording
                     && !audioMissingIds.has(item.id)
@@ -392,6 +400,38 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
+const MIN_RELIABLE_AUDIO_SECONDS = 1;
+
+function parseWavDurationSeconds(bytes: Uint8Array): number | null {
+  if (bytes.byteLength < 44) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const ascii = (offset: number, length: number) => {
+    let out = '';
+    for (let i = 0; i < length; i += 1) out += String.fromCharCode(view.getUint8(offset + i));
+    return out;
+  };
+  if (ascii(0, 4) !== 'RIFF' || ascii(8, 4) !== 'WAVE') return null;
+
+  let byteRate = 0;
+  let dataSize = 0;
+  for (let offset = 12; offset + 8 <= bytes.byteLength;) {
+    const chunkId = ascii(offset, 4);
+    const chunkSize = view.getUint32(offset + 4, true);
+    const chunkDataOffset = offset + 8;
+    if (chunkDataOffset + chunkSize > bytes.byteLength) break;
+    if (chunkId === 'fmt ' && chunkSize >= 16) {
+      byteRate = view.getUint32(chunkDataOffset + 8, true);
+    } else if (chunkId === 'data') {
+      dataSize = chunkSize;
+      break;
+    }
+    offset = chunkDataOffset + chunkSize + (chunkSize % 2);
+  }
+
+  if (byteRate <= 0) return null;
+  return dataSize / byteRate;
+}
+
 /** 当 session.hasAudioRecording 为 true 时渲染：一个加载按钮 + 拿到字节后切换为
  *  原生 audio controls。Blob URL 在组件 unmount 时 revoke，避免泄漏。
  *  `onMissing` 在后端返回 'recording not found'（wav 已被 prune）时触发，让父组件
@@ -420,6 +460,13 @@ function AudioRecordingPlayer({
     try {
       const bytes = await readAudioRecording(sessionId);
       if (bytes.byteLength === 0) throw new Error('empty recording');
+      const durationSeconds = parseWavDurationSeconds(bytes);
+      if (durationSeconds == null) throw new Error('invalid wav recording');
+      if (durationSeconds < MIN_RELIABLE_AUDIO_SECONDS) {
+        setStatus('error');
+        setErrorText(t('history.audioTooShort', { seconds: durationSeconds.toFixed(2) }));
+        return;
+      }
       // typed array 在严格 TS lib 下不直接是 BlobPart；构造独立 ArrayBuffer 后 cast。
       const buffer = new ArrayBuffer(bytes.byteLength);
       new Uint8Array(buffer).set(bytes);
