@@ -178,6 +178,7 @@ export type AsrPresetId =
     | "siliconflow"
     | "zhipu"
     | "groq"
+    | "openrouter"
     | "whisper"
     | "foundry-local-whisper"
     | "sherpa-onnx-local"

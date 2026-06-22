@@ -13,7 +13,7 @@ Windows 的 TSF 輸入法後端需要註冊到系統。若你要長期使用語�
 
 OpenLess Unbound 的服務設定主要分成兩類：
 
-- ASR：把語音轉成文字，例如 Groq Whisper、OpenAI Whisper-compatible endpoint、Foundry Local Whisper、Sherpa-ONNX local，或其他支援 provider。
+- ASR：把語音轉成文字，例如 Groq、OpenRouter Whisper、OpenAI Whisper-compatible endpoint、Foundry Local Whisper、Sherpa-ONNX local，或其他支援 provider。
 - LLM：把文字潤色、整理、翻譯，或回答劃詞追問，例如 Codex OAuth、Groq、OpenAI、Gemini、OpenRouter 或自訂 OpenAI-compatible endpoint。
 
 一般語音輸入可以使用速度較快、成本較低的模型；劃詞追問可以獨立改用品質較高或更適合推理的模型。
@@ -36,6 +36,8 @@ OpenLess Unbound 的服務設定主要分成兩類：
 - 切換 / Toggle：按一次開始錄音，再按一次停止，適合長段口述。
 
 `v1.3.6-1` 起，Groq / OpenAI Whisper 會使用 verbose JSON 過濾極短音訊或靜音造成的幻覺片段。這能減少無聲音時出現 `Thank you.` 之類誤判，但太短的錄音仍會被視為沒有有效語音。
+
+`v1.3.11-1` 起，OpenRouter 可作為 ASR provider 使用；Whisper-compatible ASR 的 timeout 也改為依錄音長度動態調整，並將全域兜底 timeout 提高到 30 秒。這主要改善較長錄音、網路較慢或 provider 回應稍慢時過早失敗的情況。
 
 ## 即時翻譯
 

@@ -626,6 +626,7 @@ export const ja: typeof zhCN = {
         asrSiliconflow: 'SiliconFlow SenseVoice',
         asrZhipu: 'Zhipu GLM-ASR',
         asrGroq: 'Groq',
+        asrOpenrouter: 'OpenRouter Whisper',
         asrWhisper: 'OpenAI Whisper（互換）',
         asrSherpaOnnxLocal: 'ローカル sherpa-onnx（実験的）',
         asrFoundryLocalWhisper: 'ローカル Whisper（Foundry Local）',

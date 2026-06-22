@@ -50,7 +50,16 @@ This fork keeps that foundation and focuses on practical constraints we ran into
 
 ## Recent Sync
 
-Starting with `v1.3.6-1`, OpenLess Unbound includes selected upstream OpenLess 1.3.6 beta improvements while keeping this fork's configurable Selection Q&A provider routing and Traditional Chinese TSF profile:
+`v1.3.11-1` is a low-risk ASR stability sync. It brings over the provider and timeout changes that have already been tested, while keeping this fork's configurable Selection Q&A provider routing, Codex OAuth support, Traditional Chinese TSF profile, and portable DLL packaging fix:
+
+- Adds OpenRouter as an ASR provider for Whisper-compatible transcription through OpenRouter.
+- Scales Whisper-compatible ASR timeouts by recording length and raises the global fallback timeout from 15 seconds to 30 seconds, reducing premature failures on longer recordings or slower networks.
+- Applies the same more stable timeout path to Selection Q&A when it uses a Whisper-compatible ASR provider.
+- Keeps the Groq ASR provider label as `Groq`; the Whisper model is configured in the model field.
+
+`v1.3.11-1` is not a full upstream 1.3.11 merge. Android, mobile remote input, Less Computer, and large UI/theme refactors remain excluded and will be evaluated separately.
+
+Starting with `v1.3.6-1`, OpenLess Unbound includes selected upstream OpenLess 1.3.6 beta improvements:
 
 - Local ASR model storage management.
 - Multi-monitor capsule positioning so the capsule follows the active input screen.
@@ -72,7 +81,7 @@ Windows may show SmartScreen or "unknown publisher" warnings until code signing 
 ## Basic Setup
 
 1. Open OpenLess Unbound.
-2. Configure an ASR provider in Settings -> Services, such as Groq Whisper, an OpenAI Whisper-compatible endpoint, Foundry Local Whisper, Sherpa-ONNX local, or another supported provider.
+2. Configure an ASR provider in Settings -> Services, such as Groq, OpenRouter Whisper, an OpenAI Whisper-compatible endpoint, Foundry Local Whisper, Sherpa-ONNX local, or another supported provider.
 3. Configure an LLM polishing model in Settings -> Services, such as Codex OAuth, Groq, OpenAI, Gemini, OpenRouter, or a custom OpenAI-compatible endpoint.
 4. Confirm the start / stop recording hotkey in Settings -> General. The default is Right Ctrl.
 5. Add frequently used names, product names, and domain terms in Vocabulary.

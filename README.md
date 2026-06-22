@@ -50,7 +50,16 @@ OpenLess Unbound 是基於 [OpenLess](https://github.com/Open-Less/openless) 的
 
 ## 近期同步內容
 
-`v1.3.6-1` 起，OpenLess Unbound 已整合部分上游 OpenLess 1.3.6 beta 改善，同時保留本 fork 的劃詞追問 provider 可配置性與繁體中文 TSF profile：
+`v1.3.11-1` 是一個低風險 ASR 穩定性同步版本，先整合已完成測試的 provider 與 timeout 改善，同時保留本 fork 的劃詞追問 provider 可配置性、Codex OAuth、繁體中文 TSF profile 與 portable DLL 打包修正：
+
+- 新增 OpenRouter ASR provider，可使用 OpenRouter 的 Whisper-compatible 轉寫服務。
+- Whisper-compatible ASR 的等待時間改為依錄音長度動態調整，並將全域兜底 timeout 從 15 秒提高到 30 秒，降低較長錄音或網路較慢時過早失敗的機率。
+- 劃詞追問使用 Whisper-compatible ASR 時，也套用同一組較穩定的 timeout。
+- ASR provider 下拉選單中的 Groq 顯示為 `Groq`，模型名稱交由「模型」欄位設定。
+
+`v1.3.11-1` 並未整包同步官方 1.3.11 的 Android、手機遠端輸入、Less Computer、大型 UI/theme 重構，這些功能會在後續版本分批評估。
+
+`v1.3.6-1` 起，OpenLess Unbound 已整合部分上游 OpenLess 1.3.6 beta 改善：
 
 - 本地 ASR 模型儲存管理。
 - 多螢幕環境下，膠囊提示跟隨目前輸入所在螢幕。
@@ -72,7 +81,7 @@ Windows 建議優先使用：
 ## 基本設定
 
 1. 開啟 OpenLess Unbound。
-2. 到「設定 → 服務」設定 ASR provider，例如 Groq Whisper、OpenAI Whisper-compatible endpoint、Foundry Local Whisper、Sherpa-ONNX local；也可依需求使用火山、百煉等其他支援項目。
+2. 到「設定 → 服務」設定 ASR provider，例如 Groq、OpenRouter Whisper、OpenAI Whisper-compatible endpoint、Foundry Local Whisper、Sherpa-ONNX local；也可依需求使用火山、百煉等其他支援項目。
 3. 到「設定 → 服務」設定 LLM 潤色模型，例如 Codex OAuth、Groq、OpenAI、Gemini、OpenRouter 或自訂 OpenAI-compatible endpoint。
 4. 到「設定 → 通用」確認開始 / 停止錄音快捷鍵，預設為 Right Ctrl。
 5. 到「詞彙表」加入常用專有名詞，例如產品名稱、英文工具、人名或品牌。

@@ -29,6 +29,7 @@ const ASR_NAME_KEY_BY_ID: Record<string, string> = {
   siliconflow: 'asrSiliconflow',
   zhipu: 'asrZhipu',
   groq: 'asrGroq',
+  openrouter: 'asrOpenrouter',
   whisper: 'asrWhisper',
   'foundry-local-whisper': 'asrFoundryLocalWhisper',
   'sherpa-onnx-local': 'asrSherpaOnnxLocal',

@@ -2,6 +2,7 @@
 //! to any OpenAI-compatible `/audio/transcriptions` endpoint on session end.
 
 use anyhow::{Context, Result};
+use base64::Engine as _;
 use parking_lot::Mutex;
 
 use crate::asr::wav::encode_wav_16k_mono;
@@ -21,6 +22,12 @@ pub const PROMPT_CHAR_BUDGET: usize = 240;
 /// 区切り文字（ASCII）。Whisper のトークナイザはどの言語でも安定して扱える。
 const PROMPT_SEPARATOR: &str = ", ";
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AsrRequestFormat {
+    Multipart,
+    OpenRouterJson,
+}
+
 pub struct WhisperBatchASR {
     api_key: String,
     base_url: String,
@@ -36,6 +43,7 @@ pub struct WhisperBatchASR {
     /// （SiliconFlow）は response_format 自体が無いので false にして従来の
     /// `json` のまま送る（壊さない）。
     verbose_json: bool,
+    request_format: AsrRequestFormat,
     buffer: Mutex<Vec<u8>>,
 }
 
@@ -55,8 +63,18 @@ impl WhisperBatchASR {
             prompt,
             max_chunk_duration_ms,
             verbose_json,
+            request_format: AsrRequestFormat::Multipart,
             buffer: Mutex::new(Vec::new()),
         }
+    }
+
+    pub fn with_request_format(mut self, request_format: AsrRequestFormat) -> Self {
+        self.request_format = request_format;
+        self
+    }
+
+    pub fn buffer_duration_ms(&self) -> u64 {
+        pcm_duration_ms(&self.buffer.lock())
     }
 
     /// Stop collecting audio, encode the buffer as WAV, and POST to the
@@ -110,6 +128,33 @@ impl WhisperBatchASR {
             .collect();
         let wav = encode_wav_16k_mono(&samples);
         let url = transcription_url(&self.base_url)?;
+
+        if self.request_format == AsrRequestFormat::OpenRouterJson {
+            let body = serde_json::json!({
+                "model": self.model.clone(),
+                "input_audio": {
+                    "data": base64::engine::general_purpose::STANDARD.encode(&wav),
+                    "format": "wav",
+                },
+            });
+            let client = reqwest::Client::new();
+            let resp = client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .json(&body)
+                .send()
+                .await
+                .context("Whisper HTTP request failed")?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Whisper API error {}: {}", status, body);
+            }
+
+            let json: serde_json::Value = resp.json().await.context("parse Whisper response")?;
+            return Ok(json["text"].as_str().unwrap_or("").trim().to_string());
+        }
 
         let wav_part = reqwest::multipart::Part::bytes(wav)
             .file_name("audio.wav")
@@ -214,9 +259,8 @@ fn extract_confident_text(json: &serde_json::Value) -> String {
             .and_then(|v| v.as_f64())
             .unwrap_or(1.0);
 
-        let is_hallucination = (no_speech > 0.6 && avg_logprob < -0.5)
-            || compression > 2.4
-            || avg_logprob < -1.0;
+        let is_hallucination =
+            (no_speech > 0.6 && avg_logprob < -0.5) || compression > 2.4 || avg_logprob < -1.0;
         if is_hallucination {
             log::warn!(
                 "[whisper] 丢弃疑似幻听段落: no_speech={:.2} avg_logprob={:.2} compression={:.2} text={:?}",
@@ -722,6 +766,59 @@ mod tests {
 
         assert_eq!(transcript.text, "你好 world 尾");
         assert_eq!(transcript.duration_ms, 65_000);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn openrouter_format_posts_json_with_base64_audio() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "timed out waiting for OpenRouter ASR test request"
+                        );
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(err) => panic!("accept OpenRouter ASR test request failed: {err}"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let request = read_http_request(&mut stream);
+            let request_text = String::from_utf8_lossy(&request);
+            let lower = request_text.to_ascii_lowercase();
+            assert!(request_text.starts_with("POST /audio/transcriptions HTTP/1.1"));
+            assert!(lower.contains("content-type: application/json"));
+            assert!(lower.contains("authorization: bearer key"));
+            assert!(request_text.contains("input_audio"));
+            assert!(request_text.contains(r#""format":"wav""#));
+            assert!(!lower.contains("multipart/form-data"));
+            write_json_response(&mut stream, r#"{"text":"openrouter ok"}"#);
+        });
+        let base_url = format!("http://{}", addr);
+        let asr = WhisperBatchASR::new(
+            "key".to_string(),
+            base_url,
+            "openai/whisper-large-v3-turbo".to_string(),
+            None,
+            None,
+            false,
+        )
+        .with_request_format(AsrRequestFormat::OpenRouterJson);
+        asr.consume_pcm_chunk(&vec![0u8; 32_000]);
+
+        let transcript = asr.transcribe().await.unwrap();
+
+        assert_eq!(transcript.text, "openrouter ok");
         server.join().unwrap();
     }
 

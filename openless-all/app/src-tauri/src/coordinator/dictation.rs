@@ -811,14 +811,17 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
         // 互換プロバイダにも揃えるのが筋。
         let whisper_prompt =
             crate::asr::whisper::build_prompt_from_phrases(&enabled_phrases(inner));
-        let whisper = Arc::new(WhisperBatchASR::new(
-            api_key,
-            base_url,
-            model,
-            whisper_prompt,
-            batch_asr_chunk_limit_ms(&active_asr),
-            whisper_supports_verbose_json(&active_asr),
-        ));
+        let whisper = Arc::new(
+            WhisperBatchASR::new(
+                api_key,
+                base_url,
+                model,
+                whisper_prompt,
+                batch_asr_chunk_limit_ms(&active_asr),
+                whisper_supports_verbose_json(&active_asr),
+            )
+            .with_request_format(whisper_request_format(&active_asr)),
+        );
         store_asr_for_session(
             inner,
             current_session_id,
@@ -909,7 +912,7 @@ pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
 
 fn batch_asr_chunk_limit_ms(provider_id: &str) -> Option<u64> {
     match provider_id {
-        "zhipu" => Some(30_000),
+        "zhipu" | "openrouter" => Some(30_000),
         _ => None,
     }
 }
@@ -1205,7 +1208,13 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         ActiveAsr::Whisper(w) => {
             debug_assert!(uses_global_timeout);
             // Whisper 也添加类似的超时保护
-            let timeout_duration = std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
+            let audio_secs = (w.buffer_duration_ms() as f64) / 1000.0;
+            let timeout_duration = whisper_transcribe_timeout(audio_secs);
+            log::info!(
+                "[coord] Whisper transcribe: audio={:.2}s timeout={}s",
+                audio_secs,
+                timeout_duration.as_secs()
+            );
             match tokio::time::timeout(timeout_duration, w.transcribe()).await {
                 Ok(Ok(r)) => r,
                 Ok(Err(e)) => {
@@ -1997,6 +2006,7 @@ mod tests {
     #[test]
     fn batch_asr_chunk_limit_applies_only_to_zhipu() {
         assert_eq!(batch_asr_chunk_limit_ms("zhipu"), Some(30_000));
+        assert_eq!(batch_asr_chunk_limit_ms("openrouter"), Some(30_000));
         assert_eq!(batch_asr_chunk_limit_ms("whisper"), None);
         assert_eq!(batch_asr_chunk_limit_ms("siliconflow"), None);
         assert_eq!(batch_asr_chunk_limit_ms("groq"), None);

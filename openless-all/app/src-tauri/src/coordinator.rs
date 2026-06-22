@@ -20,6 +20,7 @@ use uuid::Uuid;
 use crate::asr::local::{
     foundry, sherpa, FoundryLocalRuntime, FoundryLocalWhisperAsr, SherpaOnnxAsr, SherpaOnnxRuntime,
 };
+use crate::asr::whisper::AsrRequestFormat;
 use crate::asr::{
     BailianCredentials, BailianRealtimeASR, DictionaryHotword, RawTranscript,
     VolcengineCredentials, VolcengineStreamingASR, WhisperBatchASR,
@@ -203,6 +204,16 @@ fn asr_transcribe_uses_global_timeout(asr: &ActiveAsr) -> bool {
         #[cfg(target_os = "windows")]
         ActiveAsr::SherpaOnnxLocal(_) => false,
         _ => true,
+    }
+}
+
+fn active_asr_await_timeout_duration(asr: &ActiveAsr) -> std::time::Duration {
+    match asr {
+        ActiveAsr::Whisper(w) => {
+            let audio_secs = (w.buffer_duration_ms() as f64) / 1000.0;
+            whisper_transcribe_timeout(audio_secs)
+        }
+        _ => std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS),
     }
 }
 
@@ -2546,7 +2557,10 @@ async fn build_local_qwen3(
 /// (messages=[{content:[{audio:...}]}]) 协议，不是 Whisper multipart，需要
 /// 单独 ASR 客户端，留给 V2。
 fn is_whisper_compatible_provider(id: &str) -> bool {
-    matches!(id, "whisper" | "siliconflow" | "zhipu" | "groq")
+    matches!(
+        id,
+        "whisper" | "siliconflow" | "zhipu" | "groq" | "openrouter"
+    )
 }
 
 /// 该 provider 的 `/audio/transcriptions` 是否支持 `response_format=verbose_json`
@@ -2560,6 +2574,14 @@ fn is_whisper_compatible_provider(id: &str) -> bool {
 ///   为最小化行为变更，这里也**保持关闭**，仅对确证有收益的 whisper/groq 开启。
 fn whisper_supports_verbose_json(provider_id: &str) -> bool {
     matches!(provider_id, "whisper" | "groq")
+}
+
+fn whisper_request_format(provider_id: &str) -> AsrRequestFormat {
+    if provider_id == "openrouter" {
+        AsrRequestFormat::OpenRouterJson
+    } else {
+        AsrRequestFormat::Multipart
+    }
 }
 
 fn is_bailian_provider(id: &str) -> bool {
@@ -2599,7 +2621,7 @@ fn cancel_qa_asr(inner: &Arc<Inner>) {
 
 fn qa_batch_asr_chunk_limit_ms(provider_id: &str) -> Option<u64> {
     match provider_id {
-        "zhipu" => Some(30_000),
+        "zhipu" | "openrouter" => Some(30_000),
         _ => None,
     }
 }
@@ -3244,14 +3266,17 @@ async fn begin_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         let (api_key, base_url, model) = read_whisper_credentials();
         let whisper_prompt =
             crate::asr::whisper::build_prompt_from_phrases(&enabled_phrases(inner));
-        let whisper = Arc::new(WhisperBatchASR::new(
-            api_key,
-            base_url,
-            model,
-            whisper_prompt,
-            qa_batch_asr_chunk_limit_ms(&active_asr),
-            whisper_supports_verbose_json(&active_asr),
-        ));
+        let whisper = Arc::new(
+            WhisperBatchASR::new(
+                api_key,
+                base_url,
+                model,
+                whisper_prompt,
+                qa_batch_asr_chunk_limit_ms(&active_asr),
+                whisper_supports_verbose_json(&active_asr),
+            )
+            .with_request_format(whisper_request_format(&active_asr)),
+        );
         *inner.qa_asr.lock() = Some(ActiveAsr::Whisper(Arc::clone(&whisper)));
         let consumer: Arc<dyn crate::recorder::AudioConsumer> = whisper;
         if let Err(message) = start_qa_recorder_with_consumer(inner, consumer).await {
@@ -3396,7 +3421,7 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         log::error!("[coord] QA: send last frame failed: {e}");
     }
     // 添加全局超时保护：防止 await_final_result() 永远挂起
-    let timeout_duration = std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
+    let timeout_duration = active_asr_await_timeout_duration(&asr);
     let raw = match tokio::time::timeout(timeout_duration, asr.await_final_result()).await {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => {
@@ -4041,6 +4066,22 @@ mod tests {
         // SiliconFlow(SenseVoice/TeleSpeech) / Zhipu(GLM-ASR) 保持旧的 json 行为。
         assert!(!whisper_supports_verbose_json("siliconflow"));
         assert!(!whisper_supports_verbose_json("zhipu"));
+        assert!(!whisper_supports_verbose_json("openrouter"));
+    }
+
+    #[test]
+    fn openrouter_is_whisper_compatible_json_provider() {
+        assert!(is_whisper_compatible_provider("openrouter"));
+        assert_eq!(
+            whisper_request_format("openrouter"),
+            AsrRequestFormat::OpenRouterJson
+        );
+        assert_eq!(
+            whisper_request_format("whisper"),
+            AsrRequestFormat::Multipart
+        );
+        assert_eq!(whisper_request_format("groq"), AsrRequestFormat::Multipart);
+        assert_eq!(qa_batch_asr_chunk_limit_ms("openrouter"), Some(30_000));
     }
 
     #[cfg(target_os = "windows")]
@@ -4103,7 +4144,23 @@ mod tests {
         // 10.1s 录音：10.1 × 0.6 = 6.06, ceil = 7, +10 = 17, max(15) = 17。
         assert_eq!(
             local_qwen_transcribe_timeout(10.1),
-            std::time::Duration::from_secs(17)
+            std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS)
+        );
+    }
+
+    #[test]
+    fn whisper_timeout_floors_at_global_timeout_for_short_audio() {
+        assert_eq!(
+            whisper_transcribe_timeout(10.0),
+            std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS)
+        );
+    }
+
+    #[test]
+    fn whisper_timeout_scales_with_audio_duration() {
+        assert_eq!(
+            whisper_transcribe_timeout(60.0),
+            std::time::Duration::from_secs(50)
         );
     }
 
@@ -4635,7 +4692,7 @@ const POST_SESSION_COOLDOWN_MS: u64 = 600;
 /// Coordinator 全局超时保护：防止 ASR await_final_result() 永远挂起。
 /// 设置为 15 秒（比 ASR 的 12 秒 FINAL_RESULT_TIMEOUT 稍长），
 /// 只在 ASR 超时机制失效时作为最后的防线触发。
-const COORDINATOR_GLOBAL_TIMEOUT_SECS: u64 = 15;
+const COORDINATOR_GLOBAL_TIMEOUT_SECS: u64 = 30;
 
 #[cfg(target_os = "windows")]
 fn foundry_audio_transcribe_timeout_duration() -> std::time::Duration {
@@ -4649,6 +4706,13 @@ fn foundry_audio_transcribe_timeout_duration() -> std::time::Duration {
 fn local_qwen_transcribe_timeout(audio_secs: f64) -> std::time::Duration {
     let secs = ((audio_secs * 0.6).ceil() as u64)
         .saturating_add(10)
+        .max(COORDINATOR_GLOBAL_TIMEOUT_SECS);
+    std::time::Duration::from_secs(secs)
+}
+
+fn whisper_transcribe_timeout(audio_secs: f64) -> std::time::Duration {
+    let secs = ((audio_secs * 0.5).ceil() as u64)
+        .saturating_add(20)
         .max(COORDINATOR_GLOBAL_TIMEOUT_SECS);
     std::time::Duration::from_secs(secs)
 }

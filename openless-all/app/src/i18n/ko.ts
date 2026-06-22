@@ -626,6 +626,7 @@ export const ko: typeof zhCN = {
         asrSiliconflow: 'SiliconFlow SenseVoice',
         asrZhipu: 'Zhipu GLM-ASR',
         asrGroq: 'Groq',
+        asrOpenrouter: 'OpenRouter Whisper',
         asrWhisper: 'OpenAI Whisper(호환)',
         asrSherpaOnnxLocal: '로컬 sherpa-onnx(실험적)',
         asrFoundryLocalWhisper: '로컬 Whisper(Foundry Local)',
