@@ -567,6 +567,39 @@ pub struct NetworkCheckResult {
 
 #[tauri::command]
 pub async fn check_network() -> NetworkCheckResult {
+    check_cloud_network().await
+}
+
+async fn check_cloud_network() -> NetworkCheckResult {
+    let urls = [
+        "https://api.groq.com/openai/v1/models".to_string(),
+        "https://api.openai.com/v1/models".to_string(),
+        "https://www.gstatic.com/generate_204".to_string(),
+        format!("{MARKETPLACE_BASE_URL}/packs?limit=1"),
+    ];
+    let start = std::time::Instant::now();
+    for url in urls {
+        if net::http()
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(3))
+            .send()
+            .await
+            .is_ok()
+        {
+            return NetworkCheckResult {
+                online: true,
+                latency_ms: Some(start.elapsed().as_millis() as u64),
+            };
+        }
+    }
+    NetworkCheckResult {
+        online: false,
+        latency_ms: None,
+    }
+}
+
+#[allow(dead_code)]
+async fn check_marketplace_network() -> NetworkCheckResult {
     // 探一个真实存在的接口。旧逻辑探 `/health` —— 实测返回 404，链路正常也永远判
     // 离线；且用 HEAD（后端只挂 GET）。改成 GET `/packs`，拿到任意 HTTP 响应即算通。
     //
