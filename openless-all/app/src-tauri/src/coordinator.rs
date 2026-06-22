@@ -101,6 +101,7 @@ fn capsule_show_strategy_for_platform() -> CapsuleShowStrategy {
 static CAPSULE_NO_ACTIVATE_FALLBACK_WARNED: AtomicBool = AtomicBool::new(false);
 static CAPSULE_SUPPRESSED_BY_TOGGLE_LOGGED: AtomicBool = AtomicBool::new(false);
 static CAPSULE_FIRST_SHOW_LOGGED: AtomicBool = AtomicBool::new(false);
+static CAPSULE_IGNORE_CURSOR_APPLIED: AtomicBool = AtomicBool::new(false);
 
 /// 给 #470 诊断日志用的 capsule 状态短名。显式枚举每个变体到 &'static str，
 /// 不走 `Debug` —— 哪天 CapsuleState 加了 `String` 字段，`:?` 会把 ASR / polish
@@ -2730,7 +2731,7 @@ where
         );
         return StreamingPolishOutcome::UnsupportedFallback;
     }
-    let provider = match build_active_llm_provider(llm_thinking_enabled) {
+    let provider = match build_active_llm_provider_safe(llm_thinking_enabled) {
         Ok(p) => p,
         Err(e) => {
             log::error!("[coord] streaming polish: build provider failed: {e}");
@@ -2854,7 +2855,7 @@ async fn polish_text(
             .await?);
     }
 
-    let provider = build_active_llm_provider(llm_thinking_enabled)?;
+    let provider = build_active_llm_provider_safe(llm_thinking_enabled)?;
     Ok(provider
         .polish(
             raw,
@@ -2928,7 +2929,7 @@ async fn translate_text(
             .await?);
     }
 
-    let provider = build_active_llm_provider(llm_thinking_enabled)?;
+    let provider = build_active_llm_provider_safe(llm_thinking_enabled)?;
     Ok(provider
         .translate_to(
             raw,
@@ -3841,6 +3842,26 @@ fn build_active_llm_provider(llm_thinking_enabled: bool) -> anyhow::Result<Activ
     build_llm_provider(None, None, llm_thinking_enabled)
 }
 
+fn build_active_llm_provider_safe(llm_thinking_enabled: bool) -> anyhow::Result<ActiveLLMProvider> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        build_active_llm_provider(llm_thinking_enabled)
+    })) {
+        Ok(result) => result,
+        Err(panic) => {
+            let msg = format!("build_active_llm_provider panicked: {panic:?}");
+            log::error!("[coord] {msg}");
+            anyhow::bail!(msg);
+        }
+    }
+}
+
+fn capsule_ignore_cursor_for_state(state: CapsuleState) -> bool {
+    !matches!(
+        state,
+        CapsuleState::Recording | CapsuleState::Transcribing | CapsuleState::Polishing
+    )
+}
+
 fn build_llm_provider(
     active_override: Option<&str>,
     model_override: Option<&str>,
@@ -3921,8 +3942,14 @@ fn resolve_ark_endpoint_with_policy(
     if api_key.trim().is_empty() && endpoint.is_none() {
         anyhow::bail!("API Key 为空");
     }
-    Ok(endpoint
-        .unwrap_or_else(|| "https://ark.cn-beijing.volces.com/api/v3/chat/completions".to_string()))
+    let mut resolved = endpoint
+        .unwrap_or_else(|| "https://ark.cn-beijing.volces.com/api/v3/chat/completions".to_string());
+    let lower = resolved.to_ascii_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        resolved = format!("http://{resolved}");
+        log::info!("[llm] endpoint missing scheme, auto-prepended http://");
+    }
+    Ok(resolved)
 }
 
 #[cfg(test)]
@@ -4224,6 +4251,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(endpoint, "https://example.com/v1/chat/completions");
+    }
+
+    #[test]
+    fn resolve_ark_endpoint_adds_http_scheme_for_local_custom_endpoint() {
+        let endpoint =
+            resolve_ark_endpoint_with_policy("", Some("127.0.0.1:8080/v1".to_string())).unwrap();
+        assert_eq!(endpoint, "http://127.0.0.1:8080/v1");
     }
 
     #[test]
@@ -5002,13 +5036,32 @@ fn show_capsule_window_no_activate<R: tauri::Runtime>(
         SWP_SHOWWINDOW, SW_SHOWNOACTIVATE,
     };
 
-    let Ok(handle) = window.window_handle() else {
+    const HANDLE_RETRY_ATTEMPTS: u32 = 5;
+    const HANDLE_RETRY_INTERVAL_MS: u64 = 18;
+    let mut hwnd: Option<HWND> = None;
+    for attempt in 0..HANDLE_RETRY_ATTEMPTS {
+        match window.window_handle() {
+            Ok(handle) => match handle.as_raw() {
+                RawWindowHandle::Win32(raw) => {
+                    hwnd = Some(HWND(raw.hwnd.get() as *mut _));
+                    break;
+                }
+                _ => return false,
+            },
+            Err(_) if attempt + 1 < HANDLE_RETRY_ATTEMPTS => {
+                std::thread::sleep(std::time::Duration::from_millis(HANDLE_RETRY_INTERVAL_MS));
+            }
+            Err(e) => {
+                log::warn!(
+                    "[capsule] no_activate failed: window_handle unavailable after {HANDLE_RETRY_ATTEMPTS} retries ({e})"
+                );
+                return false;
+            }
+        }
+    }
+    let Some(hwnd) = hwnd else {
         return false;
     };
-    let RawWindowHandle::Win32(raw) = handle.as_raw() else {
-        return false;
-    };
-    let hwnd = HWND(raw.hwnd.get() as *mut _);
 
     let _ = unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
     let _ = unsafe {
@@ -5255,6 +5308,11 @@ fn emit_capsule(
         // Windows 上 linger 的真实问题（截图选中 / 死区 / 拖拽卡顿）由 #140 加的
         // `hide_capsule_window_if_present()` Win32 hard-hide 在 visible=false 分支
         // 处理，不依赖把 Done/Cancelled/Error 打成 invisible。详见 PR #140 评论。
+        let ignore_cursor = capsule_ignore_cursor_for_state(state);
+        if CAPSULE_IGNORE_CURSOR_APPLIED.swap(ignore_cursor, Ordering::SeqCst) != ignore_cursor {
+            let _ = window.set_ignore_cursor_events(ignore_cursor);
+        }
+
         maybe_position_capsule_bottom_center(&inner_for_main, &window, translation);
         if show_capsule && visible {
             // 用户报"看不到胶囊"时第一时间能在 log 里确认：胶囊路径有跑、show_capsule

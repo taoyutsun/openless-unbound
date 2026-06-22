@@ -1251,9 +1251,14 @@ async fn send_with_transient_retry(
     request: reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, LLMError> {
     const RETRY_DELAY_MS: u64 = 500;
-    let initial = request
-        .try_clone()
-        .expect("memory-backed body (json/form) must be clonable for retry");
+    let Some(initial) = request.try_clone() else {
+        log::warn!("[llm] request body not clonable, skipping transient retry");
+        return match request.send().await {
+            Ok(r) => Ok(r),
+            Err(e) if e.is_timeout() => Err(LLMError::Timeout),
+            Err(e) => Err(LLMError::Network(e.to_string())),
+        };
+    };
     match initial.send().await {
         Ok(r) => Ok(r),
         Err(e) if e.is_connect() || e.is_request() => {
@@ -2966,11 +2971,19 @@ mod tests {
         );
 
         // v2 PRO 自带 prompt 必须共享：四/五、ASR 纠错段 + 高/低置信度分级 + 根目录词条。
-        for mode in [PolishMode::Light, PolishMode::Structured, PolishMode::Formal] {
+        for mode in [
+            PolishMode::Light,
+            PolishMode::Structured,
+            PolishMode::Formal,
+        ] {
             let prompt = prompts::system_prompt(mode);
-            let has_asr_heading = prompt.contains("# 四、ASR 纠错") || prompt.contains("# 五、ASR 纠错");
+            let has_asr_heading =
+                prompt.contains("# 四、ASR 纠错") || prompt.contains("# 五、ASR 纠错");
             assert!(has_asr_heading, "{mode:?} prompt 缺少 v2 自带 ASR 纠错段落");
-            assert!(prompt.contains("根目录"), "{mode:?} prompt 缺少根目录纠错示例");
+            assert!(
+                prompt.contains("根目录"),
+                "{mode:?} prompt 缺少根目录纠错示例"
+            );
             assert!(
                 prompt.contains("**高置信度**") && prompt.contains("**低置信度**"),
                 "{mode:?} prompt 缺少分级置信度策略"
@@ -2982,8 +2995,14 @@ mod tests {
     fn translate_prompt_swaps_to_en_dedicated_when_target_is_english() {
         // 英文目标：整段切到 EN_TRANSLATE_SYSTEM_PROMPT，不再带通用 base 的 \"# 任务（翻译输出）\" 标题。
         let en = prompts::translate_system_prompt("English");
-        assert!(en.contains("# 任务（中文转写 → 英文翻译）"), "English target 必须使用 EN 专用 prompt");
-        assert!(!en.contains("# 任务（翻译输出）"), "English target 不应再带通用 base 标题");
+        assert!(
+            en.contains("# 任务（中文转写 → 英文翻译）"),
+            "English target 必须使用 EN 专用 prompt"
+        );
+        assert!(
+            !en.contains("# 任务（翻译输出）"),
+            "English target 不应再带通用 base 标题"
+        );
         assert!(en.contains("# 工作流程"));
         assert!(en.contains("# 中→英术语规范化"));
         assert!(en.contains("# 翻译要求"));
@@ -3004,8 +3023,7 @@ mod tests {
         // 别名容忍：'美式英文' / '英文' / 'english' / 'British English' 都走 EN 专用 prompt。
         for alias in ["美式英文", "英文", "english", "British English"] {
             assert!(
-                prompts::translate_system_prompt(alias)
-                    .contains("# 任务（中文转写 → 英文翻译）"),
+                prompts::translate_system_prompt(alias).contains("# 任务（中文转写 → 英文翻译）"),
                 "alias '{alias}' should resolve to English target"
             );
         }

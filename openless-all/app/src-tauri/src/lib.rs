@@ -1277,6 +1277,10 @@ pub(crate) struct ForegroundMonitor {
     pub(crate) top: i32,
     pub(crate) right: i32,
     pub(crate) bottom: i32,
+    pub(crate) work_left: i32,
+    pub(crate) work_top: i32,
+    pub(crate) work_right: i32,
+    pub(crate) work_bottom: i32,
     /// 该显示器的有效 DPI 缩放（1.0 = 96dpi）。
     pub(crate) scale: f64,
 }
@@ -1314,9 +1318,29 @@ pub(crate) fn foreground_window_monitor() -> Option<ForegroundMonitor> {
             top: mi.rcMonitor.top,
             right: mi.rcMonitor.right,
             bottom: mi.rcMonitor.bottom,
+            work_left: mi.rcWork.left,
+            work_top: mi.rcWork.top,
+            work_right: mi.rcWork.right,
+            work_bottom: mi.rcWork.bottom,
             scale: (dpi_x as f64 / 96.0).max(0.1),
         })
     }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn clamp_to_monitor(
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    area_left: i32,
+    area_top: i32,
+    area_right: i32,
+    area_bottom: i32,
+) -> (i32, i32) {
+    let max_x = (area_right - w).max(area_left);
+    let max_y = (area_bottom - h).max(area_top);
+    (x.clamp(area_left, max_x), y.clamp(area_top, max_y))
 }
 
 /// 把 capsule 窗口移到屏幕底部居中，与 Swift `CapsuleWindowController.repositionToBottomCenter` 同效。
@@ -1335,7 +1359,10 @@ pub(crate) fn position_capsule_bottom_center<R: tauri::Runtime>(
             let scale = mon.scale;
             let phys_w = (bounds.width * scale).round() as i32;
             let phys_h = (bounds.height * scale).round() as i32;
-            window.set_size(PhysicalSize::new(phys_w.max(1) as u32, phys_h.max(1) as u32))?;
+            window.set_size(PhysicalSize::new(
+                phys_w.max(1) as u32,
+                phys_h.max(1) as u32,
+            ))?;
 
             let mon_w = mon.right - mon.left;
             let x = mon.left + ((mon_w - phys_w) / 2).max(0);
@@ -1343,7 +1370,14 @@ pub(crate) fn position_capsule_bottom_center<R: tauri::Runtime>(
             let offset_from_bottom =
                 (capsule_visual_height(translation_active) + 80.0 + bounds.bottom_inset) * scale;
             let y = ((mon.bottom as f64) - offset_from_bottom).round() as i32;
-            window.set_position(PhysicalPosition::new(x, y.max(mon.top)))?;
+            let (work_l, work_t, work_r, work_b) =
+                if mon.work_right > mon.work_left && mon.work_bottom > mon.work_top {
+                    (mon.work_left, mon.work_top, mon.work_right, mon.work_bottom)
+                } else {
+                    (mon.left, mon.top, mon.right, mon.bottom)
+                };
+            let (x, y) = clamp_to_monitor(x, y, phys_w, phys_h, work_l, work_t, work_r, work_b);
+            window.set_position(PhysicalPosition::new(x, y))?;
             return Ok(());
         }
         // 仅当 Win32 取不到前台显示器时，落回下面的 current_monitor 逻辑。
@@ -1419,7 +1453,7 @@ fn capsule_height_for_qa() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        capsule_height_for_qa, capsule_visual_height, capsule_window_bounds,
+        capsule_height_for_qa, capsule_visual_height, capsule_window_bounds, clamp_to_monitor,
         parse_tray_polish_mode_id, rotate_log_if_too_large, tray_polish_mode_menu_entries,
         tray_style_menu_enabled, LOG_ROTATE_LIMIT_BYTES,
     };
@@ -1505,6 +1539,22 @@ mod tests {
             (bounds.width, bounds.height, bounds.bottom_inset),
             (220.0, 110.0, 0.0)
         );
+    }
+
+    #[test]
+    fn clamp_to_monitor_leaves_visible_position_untouched() {
+        assert_eq!(
+            clamp_to_monitor(800, 900, 264, 126, 0, 0, 1920, 1040),
+            (800, 900)
+        );
+    }
+
+    #[test]
+    fn clamp_to_monitor_pulls_back_offscreen_right_and_bottom() {
+        let (x, y) = clamp_to_monitor(2000, 1200, 264, 126, 0, 0, 1920, 1040);
+        assert_eq!((x, y), (1920 - 264, 1040 - 126));
+        assert!(x + 264 <= 1920);
+        assert!(y + 126 <= 1040);
     }
 
     #[test]

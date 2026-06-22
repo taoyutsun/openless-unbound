@@ -91,6 +91,17 @@ fn store_credentials_cache(root: &CredsRoot) {
 #[cfg(test)]
 fn reset_credentials_cache_for_tests() {
     *credentials_cache().lock() = None;
+    *credentials_manifest_cache().lock() = None;
+}
+
+/// issue #602：进程内缓存「上次成功读/写的 chunk manifest」。save_credentials 用它
+/// 替代保存前的 keychain manifest 读 —— macOS 上这次读本身就要过 ACL 检查（弹窗）。
+/// None = 本进程还没成功读/写过 manifest（冷启动或 keyring 不可用），此时才回
+/// keychain 读真实 manifest，保证 UUID-generation 旧 chunks 的清理信息不丢。
+static CREDENTIALS_MANIFEST_CACHE: OnceLock<Mutex<Option<CredsChunkManifest>>> = OnceLock::new();
+
+fn credentials_manifest_cache() -> &'static Mutex<Option<CredsChunkManifest>> {
+    CREDENTIALS_MANIFEST_CACHE.get_or_init(|| Mutex::new(None))
 }
 
 // ───────────────────────── path helpers ─────────────────────────
@@ -423,10 +434,7 @@ fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let tmp_path = path.with_file_name(format!(
-        "{file_name}.tmp-{}",
-        Uuid::new_v4().simple()
-    ));
+    let tmp_path = path.with_file_name(format!("{file_name}.tmp-{}", Uuid::new_v4().simple()));
     fs::write(&tmp_path, contents)
         .with_context(|| format!("write tmp failed: {}", tmp_path.display()))?;
     if let Err(err) = fs::rename(&tmp_path, path) {
@@ -696,7 +704,7 @@ fn remove_legacy_credentials_file_best_effort() {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct CredsChunkManifest {
     openless_credentials_storage: String,
     version: u32,
@@ -736,6 +744,23 @@ fn chunk_json_payload(json: &str) -> Vec<String> {
     chunks
 }
 
+/// issue #602：给定「上次成功落盘的 JSON」与「本次要写的各 chunk」，返回每个新 chunk
+/// 是否可跳过重写（与同号旧 chunk 逐字节一致）。注意 chunk 按偏移切分：靠前字段的
+/// 变长改动会移动后续所有 chunk 边界（全部重写，等同旧行为）；等长改动/无改动则只
+/// 写真正变化的 chunk。previous_json=None（冷缓存/旧 UUID 代际）→ 全部重写。
+fn chunk_skip_mask(previous_json: Option<&str>, new_chunks: &[String]) -> Vec<bool> {
+    let prev_chunks = previous_json.map(chunk_json_payload);
+    new_chunks
+        .iter()
+        .enumerate()
+        .map(|(index, chunk)| {
+            prev_chunks
+                .as_ref()
+                .is_some_and(|prev| prev.get(index) == Some(chunk))
+        })
+        .collect()
+}
+
 fn read_chunk_manifest(json: &str) -> Option<CredsChunkManifest> {
     let manifest = serde_json::from_str::<CredsChunkManifest>(json).ok()?;
     if manifest.openless_credentials_storage == "chunked" && manifest.version == 1 {
@@ -772,6 +797,8 @@ fn load_keyring_credentials() -> Result<Option<CredsRoot>> {
 
     let manifest = read_chunk_manifest(&json_or_manifest)
         .ok_or_else(|| anyhow!("invalid system credential vault manifest"))?;
+    // issue #602：manifest 刚从 keychain 读出，进缓存 —— 后续 save 不必再读一次。
+    *credentials_manifest_cache().lock() = Some(manifest.clone());
     let mut json = String::new();
     for index in 0..manifest.chunks {
         let account = chunk_account(manifest.generation.as_deref(), index);
@@ -928,21 +955,45 @@ fn load_credentials_for_update() -> Result<CredsRoot> {
 fn save_credentials(root: &CredsRoot) -> Result<()> {
     let cleaned = clean_credentials(root);
     let json = serde_json::to_string(&cleaned).context("encode credentials failed")?;
-    let previous_manifest = get_keyring_password(KEYRING_CREDENTIALS_ACCOUNT)
-        .ok()
-        .flatten()
-        .and_then(|value| read_chunk_manifest(&value));
+    // issue #602：上次成功读/写的 manifest 有进程缓存时不再回 keychain 读 ——
+    // macOS 上这次读本身就要过 ACL 检查（一次弹窗）。冷路径才读真实 manifest。
+    let previous_manifest = credentials_manifest_cache().lock().clone().or_else(|| {
+        get_keyring_password(KEYRING_CREDENTIALS_ACCOUNT)
+            .ok()
+            .flatten()
+            .and_then(|value| read_chunk_manifest(&value))
+    });
     let chunks = chunk_json_payload(&json);
+
+    // issue #602：切换供应商等小改动会触发整套「重写所有 chunks + manifest」，每个
+    // keychain 条目各自 ACL、各弹一次「OpenLess 想访问钥匙串」。用进程缓存里上次
+    // 成功落盘的 root 反推各 chunk 旧内容，内容没变的 chunk 跳过重写。仅当旧
+    // manifest 已是稳定名（generation=None）时可跳 —— UUID 代际的旧 chunk 账户名
+    // 不同，内容相同也必须写到新稳定名。缓存序列化顺序偶有差异时只会多写（回到
+    // 旧行为），不会漏写。
+    let previous_json: Option<String> = match &previous_manifest {
+        Some(m) if m.generation.is_none() => credentials_cache()
+            .lock()
+            .as_ref()
+            .and_then(|prev| serde_json::to_string(prev).ok()),
+        _ => None,
+    };
+    let skip = chunk_skip_mask(previous_json.as_deref(), &chunks);
 
     // 先写所有 chunks（稳定名），再写 manifest —— 保证 partial-write 不会让
     // manifest 指向不完整 chunks。stable name 让 macOS Keychain ACL 一次允许后
     // 长期有效，不再因 UUID 轮换反复弹窗（这是 PR #277 早期 UUID-rotation
     // 设计的回退）。
+    let mut chunks_written = 0usize;
     for (index, chunk) in chunks.iter().enumerate() {
+        if skip[index] {
+            continue;
+        }
         let account = chunk_account(None, index);
         keyring_entry_for(&account)?
             .set_password(chunk)
             .with_context(|| format!("write system credential vault chunk {index}"))?;
+        chunks_written += 1;
     }
 
     let manifest = CredsChunkManifest {
@@ -951,11 +1002,27 @@ fn save_credentials(root: &CredsRoot) -> Result<()> {
         generation: None,
         chunks: chunks.len(),
     };
-    let manifest_json =
-        serde_json::to_string(&manifest).context("encode credential manifest failed")?;
-    keyring_entry()?
-        .set_password(&manifest_json)
-        .context("write system credential vault manifest")?;
+    // manifest 内容只由 chunks 数决定：数量没变且旧 manifest 已是稳定名时内容
+    // 逐字节一致，跳过重写（又省一次 ACL 弹窗）。
+    let manifest_unchanged = previous_manifest
+        .as_ref()
+        .is_some_and(|m| m.generation.is_none() && m.chunks == chunks.len());
+    if !manifest_unchanged {
+        let manifest_json =
+            serde_json::to_string(&manifest).context("encode credential manifest failed")?;
+        keyring_entry()?
+            .set_password(&manifest_json)
+            .context("write system credential vault manifest")?;
+    }
+    log::info!(
+        "[vault] save_credentials: {chunks_written}/{} chunks written, manifest {}",
+        chunks.len(),
+        if manifest_unchanged {
+            "unchanged"
+        } else {
+            "rewritten"
+        }
+    );
 
     // 清理旧 chunks：
     // 1) 旧 manifest 用 UUID generation → 那一代 chunks 全删（迁移到 stable name）
@@ -979,6 +1046,7 @@ fn save_credentials(root: &CredsRoot) -> Result<()> {
     // 写完成功后立刻刷新 process cache —— 同进程后续读不再回 Keychain。
     // 见 CREDENTIALS_CACHE 的 doc。
     store_credentials_cache(&cleaned);
+    *credentials_manifest_cache().lock() = Some(manifest);
     Ok(())
 }
 
@@ -1217,9 +1285,19 @@ struct StylePackArchiveManifest {
     compatible_app_version: Option<String>,
     /// Marketplace 上游关系。旧 ZIP 没有此字段时自动为 None；
     /// 兼容早期口误/拼写包里可能出现的 `orion*` 字段名。
-    #[serde(default, alias = "orionPackId", alias = "orion_pack_id", alias = "origin_pack_id")]
+    #[serde(
+        default,
+        alias = "orionPackId",
+        alias = "orion_pack_id",
+        alias = "origin_pack_id"
+    )]
     origin_pack_id: Option<String>,
-    #[serde(default, alias = "orionAuthorLogin", alias = "orion_author_login", alias = "origin_author_login")]
+    #[serde(
+        default,
+        alias = "orionAuthorLogin",
+        alias = "orion_author_login",
+        alias = "origin_author_login"
+    )]
     origin_author_login: Option<String>,
 }
 
@@ -2435,8 +2513,9 @@ impl CredentialsVault {
 #[cfg(test)]
 mod tests {
     use super::{
-        chunk_json_payload, list_vocab_presets, read_preferences, save_vocab_presets,
-        sync_style_pack_preferences, validate_correction_rule_syntax, KEYRING_CHUNK_MAX_UTF16_UNITS,
+        chunk_json_payload, chunk_skip_mask, list_vocab_presets, read_preferences,
+        save_vocab_presets, sync_style_pack_preferences, validate_correction_rule_syntax,
+        KEYRING_CHUNK_MAX_UTF16_UNITS,
     };
     use crate::types::{builtin_style_packs, CustomStylePrompts, VocabPreset, VocabPresetStore};
     use std::fs;
@@ -2456,6 +2535,38 @@ mod tests {
         assert!(chunks
             .iter()
             .all(|chunk| chunk.encode_utf16().count() <= KEYRING_CHUNK_MAX_UTF16_UNITS));
+    }
+
+    #[test]
+    fn chunk_skip_mask_skips_unchanged_and_rewrites_changed() {
+        // issue #602：内容完全一致 → 全部跳过（no-op save 不再碰 keychain chunks）。
+        let json = format!(
+            "{}{}",
+            "a".repeat(KEYRING_CHUNK_MAX_UTF16_UNITS),
+            "b".repeat(KEYRING_CHUNK_MAX_UTF16_UNITS)
+        );
+        let chunks = chunk_json_payload(&json);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunk_skip_mask(Some(&json), &chunks).iter().all(|s| *s));
+
+        // 等长改动只落在第 2 个 chunk → 第 1 个跳过、第 2 个重写。
+        let changed = format!(
+            "{}{}",
+            "a".repeat(KEYRING_CHUNK_MAX_UTF16_UNITS),
+            "c".repeat(KEYRING_CHUNK_MAX_UTF16_UNITS)
+        );
+        let changed_chunks = chunk_json_payload(&changed);
+        assert_eq!(
+            chunk_skip_mask(Some(&json), &changed_chunks),
+            vec![true, false]
+        );
+
+        // 冷缓存（None）→ 全部重写，等同旧行为。
+        assert!(chunk_skip_mask(None, &chunks).iter().all(|s| !*s));
+
+        // 旧内容更短 → 超出部分无旧 chunk 可比，必须写。
+        let shorter = "a".repeat(KEYRING_CHUNK_MAX_UTF16_UNITS);
+        assert_eq!(chunk_skip_mask(Some(&shorter), &chunks), vec![true, false]);
     }
 
     #[test]

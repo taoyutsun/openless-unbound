@@ -14,6 +14,8 @@ use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
 
+#[cfg(target_os = "macos")]
+use anyhow::Context;
 use anyhow::Result;
 use serde::Serialize;
 
@@ -42,6 +44,44 @@ pub async fn run_test(model_id: ModelId) -> Result<TestResult> {
     let dir = model_dir(model_id)?;
     if !dir.exists() {
         anyhow::bail!("模型目录不存在：{}（请先下载）", dir.display());
+    }
+
+    let required_files = ["config.json", "vocab.json", "merges.txt"];
+    for name in required_files {
+        let path = dir.join(name);
+        if !path.exists() {
+            anyhow::bail!("模型文件缺失：{name}，請重新下載（{}）", path.display());
+        }
+        let meta =
+            std::fs::metadata(&path).with_context(|| format!("讀取 {name} metadata 失敗"))?;
+        if meta.len() == 0 {
+            anyhow::bail!("模型文件為空：{name}，請重新下載");
+        }
+    }
+    let safetensors = std::fs::read_dir(&dir)
+        .with_context(|| format!("讀取模型目錄失敗：{}", dir.display()))?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "safetensors")
+        })
+        .collect::<Vec<_>>();
+    if safetensors.is_empty() {
+        anyhow::bail!("模型目錄中沒有 .safetensors 權重文件，請重新下載");
+    }
+    for entry in &safetensors {
+        let path = entry.path();
+        let meta = std::fs::metadata(&path)
+            .with_context(|| format!("讀取 {} metadata 失敗", path.display()))?;
+        if meta.len() < 1024 {
+            anyhow::bail!(
+                "權重文件太小（{} bytes）：{}，請重新下載",
+                meta.len(),
+                path.display()
+            );
+        }
     }
 
     let samples = decode_wav_16k_mono(TEST_WAV)?;
