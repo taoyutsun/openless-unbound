@@ -1052,6 +1052,140 @@ impl Coordinator {
         .map_err(|e| e.to_string())
     }
 
+    pub async fn retranscribe_pcm(&self, pcm: Vec<u8>) -> Result<String, String> {
+        if pcm.is_empty() {
+            return Err("recording is empty".to_string());
+        }
+        let inner = &self.inner;
+        let active_asr = CredentialsVault::get_active_asr();
+
+        #[cfg(target_os = "windows")]
+        if foundry::is_foundry_local_whisper(&active_asr) {
+            let prefs = inner.prefs.get();
+            let model_alias = if foundry::model_alias_is_known(&prefs.foundry_local_asr_model) {
+                prefs.foundry_local_asr_model.clone()
+            } else {
+                foundry::DEFAULT_MODEL_ALIAS.to_string()
+            };
+            let language_hint = prefs.foundry_local_asr_language_hint.trim().to_string();
+            let language_hint = if language_hint.is_empty() {
+                None
+            } else {
+                Some(language_hint)
+            };
+            let provider = FoundryLocalWhisperAsr::new(
+                Arc::clone(&inner.foundry_local_runtime),
+                model_alias,
+                prefs.foundry_local_runtime_source.clone(),
+                language_hint,
+            );
+            crate::recorder::AudioConsumer::consume_pcm_chunk(&provider, &pcm);
+            let raw = provider
+                .transcribe(foundry_audio_transcribe_timeout_duration())
+                .await
+                .map_err(|e| e.to_string())?;
+            let release_session_id = inner.state.lock().session_id;
+            schedule_foundry_local_asr_release(inner, release_session_id);
+            return Ok(raw.text);
+        }
+
+        #[cfg(target_os = "windows")]
+        if sherpa::is_sherpa_onnx_local(&active_asr) {
+            let prefs = inner.prefs.get();
+            let model_alias = if sherpa::model_alias_is_known(&prefs.sherpa_onnx_model) {
+                prefs.sherpa_onnx_model.clone()
+            } else {
+                sherpa::DEFAULT_MODEL_ALIAS.to_string()
+            };
+            let language_hint = prefs.sherpa_onnx_language_hint.trim().to_string();
+            let language_hint = if language_hint.is_empty() {
+                None
+            } else {
+                Some(language_hint)
+            };
+            let provider = SherpaOnnxAsr::new_for_model(
+                Arc::clone(&inner.sherpa_onnx_runtime),
+                model_alias,
+                language_hint,
+                None,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            crate::recorder::AudioConsumer::consume_pcm_chunk(&provider, &pcm);
+            let raw = provider
+                .transcribe(sherpa_audio_transcribe_timeout_duration())
+                .await
+                .map_err(|e| e.to_string())?;
+            let release_session_id = inner.state.lock().session_id;
+            schedule_sherpa_onnx_release(inner, release_session_id);
+            return Ok(raw.text);
+        }
+
+        #[cfg(target_os = "macos")]
+        if crate::asr::local::is_local_qwen3(&active_asr) {
+            let provider = build_local_qwen3(inner).await.map_err(|e| e.to_string())?;
+            crate::recorder::AudioConsumer::consume_pcm_chunk(&*provider, &pcm);
+            let audio_secs = (provider.buffer_duration_ms() as f64) / 1000.0;
+            let timeout_duration = local_qwen_transcribe_timeout(audio_secs);
+            inner.local_asr_cache.touch();
+            let raw = tokio::time::timeout(timeout_duration, provider.transcribe())
+                .await
+                .map_err(|_| "重新轉錄逾時".to_string())?
+                .map_err(|e| e.to_string())?;
+            schedule_local_asr_release(inner);
+            return Ok(raw.text);
+        }
+
+        let timeout = std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS);
+        if is_bailian_provider(&active_asr) {
+            let asr = Arc::new(BailianRealtimeASR::new(read_bailian_credentials()));
+            asr.open_session().await.map_err(|e| e.to_string())?;
+            crate::asr::AudioConsumer::consume_pcm_chunk(&*asr, &pcm);
+            asr.send_last_frame().await.map_err(|e| e.to_string())?;
+            let raw = tokio::time::timeout(timeout, asr.await_final_result())
+                .await
+                .map_err(|_| "重新轉錄逾時".to_string())?
+                .map_err(|e| e.to_string())?;
+            return Ok(raw.text);
+        }
+
+        if is_whisper_compatible_provider(&active_asr) {
+            let (api_key, base_url, model) = read_whisper_credentials();
+            let whisper_prompt =
+                crate::asr::whisper::build_prompt_from_phrases(&enabled_phrases(inner));
+            let whisper = WhisperBatchASR::new(
+                api_key,
+                base_url,
+                model,
+                whisper_prompt,
+                qa_batch_asr_chunk_limit_ms(&active_asr),
+                whisper_supports_verbose_json(&active_asr),
+            )
+            .with_request_format(whisper_request_format(&active_asr));
+            crate::recorder::AudioConsumer::consume_pcm_chunk(&whisper, &pcm);
+            let audio_secs = (whisper.buffer_duration_ms() as f64) / 1000.0;
+            let raw = tokio::time::timeout(whisper_transcribe_timeout(audio_secs), whisper.transcribe())
+                .await
+                .map_err(|_| "重新轉錄逾時".to_string())?
+                .map_err(|e| e.to_string())?;
+            return Ok(raw.text);
+        }
+
+        let hotwords = enabled_hotwords(inner);
+        let asr = Arc::new(VolcengineStreamingASR::new(
+            read_volc_credentials(),
+            hotwords,
+        ));
+        asr.open_session().await.map_err(|e| e.to_string())?;
+        crate::asr::AudioConsumer::consume_pcm_chunk(&*asr, &pcm);
+        asr.send_last_frame().await.map_err(|e| e.to_string())?;
+        let raw = tokio::time::timeout(timeout, asr.await_final_result())
+            .await
+            .map_err(|_| "重新轉錄逾時".to_string())?
+            .map_err(|e| e.to_string())?;
+        Ok(raw.text)
+    }
+
     pub fn preview_style_pack_runtime(
         &self,
         style_pack: &crate::types::StylePack,

@@ -295,9 +295,9 @@ pub fn local_models_root() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// 录音归档目录：`<data_dir>/recordings/`。
-/// 仅当用户开 `prefs.record_audio_for_debug` 时才会有内容（每次会话一个 `<session_id>.wav`）。
-/// 同样受 `history_retention_days` 清理（写入新文件时顺手裁旧的）。
+/// Recording archive dir: `<data_dir>/recordings/`.
+/// Contains debug recordings plus failed/empty transcript recordings kept for replay/retranscribe.
+/// Uses the same retention/count pruning policy.
 pub fn recordings_root() -> Result<PathBuf> {
     let dir = data_dir()?.join("recordings");
     ensure_dir(&dir)?;
@@ -1207,6 +1207,17 @@ impl HistoryStore {
             return Ok(());
         }
         self.write_locked(&sessions)
+    }
+
+    pub fn update_entry(&self, session: DictationSession) -> Result<bool> {
+        let _guard = self.lock.lock();
+        let mut sessions = self.read_locked()?;
+        let Some(existing) = sessions.iter_mut().find(|s| s.id == session.id) else {
+            return Ok(false);
+        };
+        *existing = session;
+        self.write_locked(&sessions)?;
+        Ok(true)
     }
 
     pub fn clear(&self) -> Result<()> {

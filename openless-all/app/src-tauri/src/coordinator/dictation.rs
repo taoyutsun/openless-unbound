@@ -13,6 +13,16 @@ use super::*;
 /// 避免微动开关回弹 / 用户手抖双击造成的空转写报错和 ASR session 抢资源。
 const HOTKEY_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(250);
 const STREAMING_INSERT_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(12);
+const HOTKEY_QUEUE_GRACE_MS: u64 = 120;
+
+fn is_queued_chain_press(now: std::time::Instant, cooldown_until: std::time::Instant) -> bool {
+    let cooldown = std::time::Duration::from_millis(POST_SESSION_COOLDOWN_MS);
+    let remaining = cooldown_until.saturating_duration_since(now);
+    cooldown
+        .checked_sub(remaining)
+        .map(|since_idle| since_idle < std::time::Duration::from_millis(HOTKEY_QUEUE_GRACE_MS))
+        .unwrap_or(false)
+}
 
 /// 跑流式润色路径（opt-in，跨平台）。
 ///
@@ -463,16 +473,20 @@ pub(super) async fn handle_pressed(inner: &Arc<Inner>) {
             // 冷却检查：end_session 刚收尾时禁止短时间内再次激活，
             // 避免三连按第 3 次误触（此时胶囊仍在离场动画周期内，issue #545）。
             let now = std::time::Instant::now();
-            let on_cooldown = inner
-                .session_cooldown_until
-                .lock()
-                .map(|deadline| now < deadline)
-                .unwrap_or(false);
-            if on_cooldown {
-                log::info!(
-                    "[coord] toggle activation blocked by cooldown (session still winding down)"
-                );
-                return;
+            let cooldown_until = *inner.session_cooldown_until.lock();
+            if let Some(deadline) = cooldown_until {
+                if now < deadline {
+                    if is_queued_chain_press(now, deadline) {
+                        log::info!(
+                            "[coord] queued-chain activation: starting next dictation after processing"
+                        );
+                    } else {
+                        log::info!(
+                            "[coord] toggle activation blocked by cooldown (session still winding down)"
+                        );
+                        return;
+                    }
+                }
             }
             let _ = begin_session(inner).await;
         }
@@ -963,18 +977,17 @@ pub(super) async fn start_recorder_for_starting(
     let microphone_device_name = selected_microphone_device_name(inner);
     stop_microphone_preview_monitor(inner, "dictation recorder");
     acquire_recording_mute(inner, "dictation").await;
-    let audio_archive_path = if inner.prefs.get().record_audio_for_debug {
-        // 用 coordinator 的 SessionId 作为文件名，跟 history 那条记录 id 对齐（见
-        // 下游 polish 收尾时 `history_session_id = current_session_id.to_string()`）。
-        // 顺手把超龄 / 超量录音清理一下，避免 debug 开关常开时磁盘膨胀。
+    inner.audio_archive_active.store(false, Ordering::Relaxed);
+    let audio_archive_path = {
+        // Keep the WAV under the coordinator session id so failed or empty
+        // transcripts can be replayed and retranscribed from History.
+        // Successful non-debug recordings are removed after ASR completes.
         let prefs = inner.prefs.get();
         let _ = crate::persistence::prune_recordings(
             prefs.history_retention_days,
             prefs.audio_recording_max_entries,
         );
         crate::persistence::recording_path_for_session(&session_id.to_string()).ok()
-    } else {
-        None
     };
     match Recorder::start(
         microphone_device_name,
@@ -1129,6 +1142,75 @@ pub(super) async fn finish_starting_session(inner: &Arc<Inner>, session_id: Sess
     }
 }
 
+fn build_transcribe_failed_session(
+    session_id: SessionId,
+    duration_ms: u64,
+    mode: PolishMode,
+    has_audio_recording: bool,
+) -> DictationSession {
+    DictationSession {
+        id: session_id.to_string(),
+        created_at: Utc::now().to_rfc3339(),
+        raw_transcript: String::new(),
+        final_text: String::new(),
+        mode,
+        app_bundle_id: None,
+        app_name: None,
+        insert_status: InsertStatus::Failed,
+        error_code: Some("transcribeFailed".to_string()),
+        duration_ms: Some(duration_ms),
+        dictionary_entry_count: None,
+        has_audio_recording: Some(has_audio_recording),
+    }
+}
+
+fn append_transcribe_failed_history(inner: &Arc<Inner>, session_id: SessionId, duration_ms: u64) {
+    let prefs = inner.prefs.get();
+    let session = build_transcribe_failed_session(
+        session_id,
+        duration_ms,
+        prefs.default_mode,
+        inner.audio_archive_active.load(Ordering::Relaxed),
+    );
+    if let Err(e) = inner.history.append_with_retention(
+        session,
+        prefs.history_retention_days,
+        prefs.history_max_entries,
+    ) {
+        log::error!("[coord] transcribeFailed history append failed: {e}");
+    }
+}
+
+struct TranscribeFailureHistoryGuard<'a> {
+    inner: &'a Arc<Inner>,
+    session_id: SessionId,
+    duration_ms: u64,
+    armed: bool,
+}
+
+impl<'a> TranscribeFailureHistoryGuard<'a> {
+    fn new(inner: &'a Arc<Inner>, session_id: SessionId, duration_ms: u64) -> Self {
+        Self {
+            inner,
+            session_id,
+            duration_ms,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TranscribeFailureHistoryGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            append_transcribe_failed_history(self.inner, self.session_id, self.duration_ms);
+        }
+    }
+}
+
 pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
     let current_session_id = {
         let mut state = inner.state.lock();
@@ -1157,6 +1239,8 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
     };
 
     let uses_global_timeout = asr_transcribe_uses_global_timeout(&asr);
+    let mut transcribe_failure_history =
+        TranscribeFailureHistoryGuard::new(inner, current_session_id, elapsed);
     let raw = match asr {
         ActiveAsr::Volcengine(asr) => {
             debug_assert!(uses_global_timeout);
@@ -1315,6 +1399,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
                         schedule_foundry_local_asr_release(inner, current_session_id);
                         restore_prepared_windows_ime_session(inner, current_session_id);
                         set_phase_idle_if_session_matches(inner, current_session_id);
+                        transcribe_failure_history.disarm();
                         return Ok(());
                     }
                     log::error!("[coord] Foundry Local Whisper transcribe failed: {e:#}");
@@ -1355,6 +1440,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
                         schedule_sherpa_onnx_release(inner, current_session_id);
                         restore_prepared_windows_ime_session(inner, current_session_id);
                         set_phase_idle_if_session_matches(inner, current_session_id);
+                        transcribe_failure_history.disarm();
                         return Ok(());
                     }
                     log::error!("[coord] sherpa-onnx transcribe failed: {e:#}");
@@ -1434,6 +1520,8 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
 
     // ASR 完成后 cancel 检查：用户在 transcribe 进行中按 Esc 时，这里就会命中。
     // 优先级高于 empty 检查 — 用户取消 → 静默丢弃，不写失败历史也不弹错误胶囊。
+    transcribe_failure_history.disarm();
+
     if inner.state.lock().cancelled {
         log::info!("[coord] cancel detected after ASR — discarding transcript");
         restore_prepared_windows_ime_session(inner, current_session_id);
@@ -1466,7 +1554,7 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
 
     if raw.text.trim().is_empty() {
         let session = DictationSession {
-            id: Uuid::new_v4().to_string(),
+            id: current_session_id.to_string(),
             created_at: Utc::now().to_rfc3339(),
             raw_transcript: raw.text.clone(),
             final_text: String::new(),
@@ -1502,6 +1590,20 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         inner.state.lock().phase = SessionPhase::Idle;
         schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS);
         return Err("ASR returned empty transcript".to_string());
+    }
+
+    if !inner.prefs.get().record_audio_for_debug
+        && inner.audio_archive_active.swap(false, Ordering::Relaxed)
+    {
+        if let Ok(path) =
+            crate::persistence::recording_path_for_session(&current_session_id.to_string())
+        {
+            if let Err(e) = tokio::fs::remove_file(&path).await {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    log::warn!("[coord] remove successful transient recording failed: {e}");
+                }
+            }
+        }
     }
 
     let correction_rules = match inner.correction_rules.list() {
@@ -1908,7 +2010,8 @@ mod tests {
     use super::{
         append_typed_prefix, batch_asr_chunk_limit_ms, default_done_message,
         drain_streaming_insert_deltas_with, finalize_polished_text,
-        flush_streaming_insert_buffer_with, streaming_insert_eligible,
+        flush_streaming_insert_buffer_with, is_queued_chain_press, streaming_insert_eligible,
+        build_transcribe_failed_session, HOTKEY_QUEUE_GRACE_MS,
     };
     use crate::types::{ChineseScriptPreference, CorrectionRule, InsertStatus, PolishMode};
 
@@ -2040,6 +2143,41 @@ mod tests {
             );
             assert_eq!(out, expected);
         }
+    }
+
+    #[test]
+    fn queued_chain_press_allowed_within_grace_blocked_after() {
+        use std::time::{Duration, Instant};
+
+        let cooldown_ms = crate::coordinator::POST_SESSION_COOLDOWN_MS;
+        let idle = Instant::now();
+        let cooldown_until = idle + Duration::from_millis(cooldown_ms);
+
+        assert!(is_queued_chain_press(idle, cooldown_until));
+        assert!(is_queued_chain_press(
+            idle + Duration::from_millis(HOTKEY_QUEUE_GRACE_MS - 1),
+            cooldown_until
+        ));
+        assert!(!is_queued_chain_press(
+            idle + Duration::from_millis(300),
+            cooldown_until
+        ));
+        assert!(!is_queued_chain_press(
+            idle + Duration::from_millis(cooldown_ms + 10),
+            cooldown_until
+        ));
+    }
+
+    #[test]
+    fn transcribe_failed_history_uses_session_id_and_audio_flag() {
+        let sid = uuid::Uuid::new_v4();
+        let session = build_transcribe_failed_session(sid, 1234, PolishMode::Structured, true);
+
+        assert_eq!(session.id, sid.to_string());
+        assert!(matches!(session.insert_status, InsertStatus::Failed));
+        assert_eq!(session.error_code.as_deref(), Some("transcribeFailed"));
+        assert_eq!(session.duration_ms, Some(1234));
+        assert_eq!(session.has_audio_recording, Some(true));
     }
 
     #[test]

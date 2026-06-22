@@ -697,6 +697,19 @@ export function readAudioRecording(sessionId: string): Promise<Uint8Array> {
     })
 }
 
+export function retranscribeRecording(sessionId: string): Promise<DictationSession> {
+    return invokeOrMock("retranscribe_recording", { sessionId }, () => {
+        const match = mockHistory.find(item => item.id === sessionId)
+        if (!match) throw new Error("history entry not found")
+        return {
+            ...match,
+            rawTranscript: match.rawTranscript || "Retranscribed text",
+            finalText: match.finalText || match.rawTranscript || "Retranscribed text",
+            errorCode: null,
+        }
+    })
+}
+
 // ── Vocab ──────────────────────────────────────────────────────────────
 export function listVocab(): Promise<DictionaryEntry[]> {
     return invokeOrMock("list_vocab", undefined, () => mockVocab)

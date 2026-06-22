@@ -1364,8 +1364,8 @@ pub fn clear_history(coord: CoordinatorState<'_>) -> Result<(), String> {
     coord.history().clear().map_err(|e| e.to_string())
 }
 
-/// 读取某次会话的原始麦克风 wav 字节流。仅当用户开过
-/// `prefs.record_audio_for_debug` 并且这条 session 是开关打开后录的，才会有文件。
+/// 读取某次会话的原始麦克风 wav 字节流。
+/// Debug 录音、转录失败或空转录的 session 可能保留文件；成功的非 debug 录音会被删除。
 /// 文件名规约：`<data_dir>/recordings/<session_id>.wav`，与 DictationSession.id 同名。
 ///
 /// 路径校验：session_id **必须**严格匹配 UUID-v4 字面（36 字符 = 8-4-4-4-12 + 4 个 `-`，
@@ -1396,6 +1396,54 @@ pub async fn read_audio_recording(session_id: String) -> Result<Vec<u8>, String>
             format!("read wav failed: {e}")
         }
     })
+}
+
+#[tauri::command]
+pub async fn retranscribe_recording(
+    coord: CoordinatorState<'_>,
+    session_id: String,
+) -> Result<DictationSession, String> {
+    if !is_valid_session_id(&session_id) {
+        return Err("invalid session id".into());
+    }
+    let path =
+        crate::persistence::recording_path_for_session(&session_id).map_err(|e| e.to_string())?;
+    let wav = tokio::fs::read(&path).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "recording not found".into()
+        } else {
+            format!("read wav failed: {e}")
+        }
+    })?;
+    if wav.len() <= 44 {
+        return Err("recording is empty or corrupt".into());
+    }
+    let pcm = wav[44..].to_vec();
+
+    let text = coord.retranscribe_pcm(pcm).await?;
+    if text.trim().is_empty() {
+        return Err("重新轉錄仍未識別到語音".into());
+    }
+
+    let mut entry = coord
+        .history()
+        .list()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|s| s.id == session_id)
+        .ok_or_else(|| "history entry not found".to_string())?;
+    entry.raw_transcript = text.clone();
+    entry.final_text = text;
+    entry.error_code = None;
+
+    let updated = coord
+        .history()
+        .update_entry(entry.clone())
+        .map_err(|e| e.to_string())?;
+    if !updated {
+        return Err("history entry not found".into());
+    }
+    Ok(entry)
 }
 
 /// UUID-v4 字面校验：36 字符 + 5 段 `-` 分隔（8-4-4-4-12）+ 仅 ASCII 十六进制。
