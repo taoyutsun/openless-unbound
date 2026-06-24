@@ -50,6 +50,8 @@ OpenLess Unbound 是基於 [OpenLess](https://github.com/Open-Less/openless) 的
 
 ## 近期同步內容
 
+`v1.3.11-2` 修正繁體中文強制字形轉換使用一般 `s2t` 導致「吃」被轉成「喫」的問題，改用台灣繁體字形轉換，讓「吃飯」維持台灣日常用字。
+
 `v1.3.11-1` 是一個低風險 ASR 穩定性同步版本，先整合已完成測試的 provider 與 timeout 改善，同時保留本 fork 的劃詞追問 provider 可配置性、Codex OAuth、繁體中文 TSF profile 與 portable DLL 打包修正：
 
 - 新增 OpenRouter ASR provider，可使用 OpenRouter 的 Whisper-compatible 轉寫服務。

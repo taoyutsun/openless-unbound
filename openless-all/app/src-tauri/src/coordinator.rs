@@ -2729,7 +2729,7 @@ fn apply_chinese_script_preference(text: &str, pref: ChineseScriptPreference) ->
     }
     let config = match pref {
         ChineseScriptPreference::Simplified => Some(BuiltinConfig::T2s),
-        ChineseScriptPreference::Traditional => Some(BuiltinConfig::S2t),
+        ChineseScriptPreference::Traditional => Some(BuiltinConfig::S2tw),
         ChineseScriptPreference::Auto => None,
     };
     let Some(config) = config else {
@@ -4719,6 +4719,18 @@ mod tests {
         assert_eq!(
             dictation_error_code(InsertStatus::Failed, false, true, false),
             Some("windowsImeTsfRequired")
+        );
+    }
+
+    #[test]
+    fn traditional_script_preference_uses_taiwan_common_forms() {
+        assert_eq!(
+            apply_chinese_script_preference("我想吃饭", ChineseScriptPreference::Traditional),
+            "我想吃飯"
+        );
+        assert_eq!(
+            apply_chinese_script_preference("我想吃飯", ChineseScriptPreference::Traditional),
+            "我想吃飯"
         );
     }
 

@@ -50,6 +50,8 @@ This fork keeps that foundation and focuses on practical constraints we ran into
 
 ## Recent Sync
 
+`v1.3.11-2` fixes a Traditional Chinese conversion regression where the general `s2t` table changed `吃` into the less common `喫`. The app now uses the Taiwan Traditional conversion table so everyday Taiwan wording such as `吃飯` stays intact.
+
 `v1.3.11-1` is a low-risk ASR stability sync. It brings over the provider and timeout changes that have already been tested, while keeping this fork's configurable Selection Q&A provider routing, Codex OAuth support, Traditional Chinese TSF profile, and portable DLL packaging fix:
 
 - Adds OpenRouter as an ASR provider for Whisper-compatible transcription through OpenRouter.

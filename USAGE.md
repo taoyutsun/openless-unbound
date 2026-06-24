@@ -39,6 +39,8 @@ OpenLess Unbound 的服務設定主要分成兩類：
 
 `v1.3.11-1` 起，OpenRouter 可作為 ASR provider 使用；Whisper-compatible ASR 的 timeout 也改為依錄音長度動態調整，並將全域兜底 timeout 提高到 30 秒。這主要改善較長錄音、網路較慢或 provider 回應稍慢時過早失敗的情況。
 
+`v1.3.11-2` 起，繁體中文強制字形轉換改用台灣繁體字形表，避免「吃」被一般簡繁表轉成「喫」。
+
 ## 即時翻譯
 
 預設流程：
