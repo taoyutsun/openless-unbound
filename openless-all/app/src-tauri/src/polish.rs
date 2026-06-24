@@ -1679,7 +1679,7 @@ pub(crate) fn compose_polish_prompts(
     style_system_prompt: &str,
     working_languages: &[String],
     chinese_script_preference: ChineseScriptPreference,
-    output_language_preference: OutputLanguagePreference,
+    _output_language_preference: OutputLanguagePreference,
     front_app: Option<&str>,
     has_prior_turns: bool,
 ) -> (String, String) {
@@ -1687,7 +1687,7 @@ pub(crate) fn compose_polish_prompts(
     if let Some(premise) = context_premise(
         working_languages,
         chinese_script_preference,
-        output_language_preference,
+        OutputLanguagePreference::Auto,
         front_app,
     ) {
         system_prompt = format!("{}\n\n{}", premise, system_prompt);
@@ -1731,7 +1731,7 @@ pub(crate) fn assemble_polish_system_prompt(
     let context_premise = context_premise(
         working_languages,
         chinese_script_preference,
-        output_language_preference,
+        OutputLanguagePreference::Auto,
         front_app,
     )
     .unwrap_or_default();
@@ -2647,6 +2647,47 @@ mod tests {
         assert!(
             s.contains("当前") && s.contains("最新"),
             "需要明确：只输出当前最新一条"
+        );
+    }
+
+    #[test]
+    fn polish_prompt_does_not_force_output_language_preference() {
+        let (system_prompt, user_prompt) = compose_polish_prompts(
+            "Please keep this sentence in English",
+            PolishMode::Light,
+            &[],
+            "Keep the original language and add punctuation.",
+            &["繁體中文".to_string()],
+            ChineseScriptPreference::Traditional,
+            OutputLanguagePreference::ZhTw,
+            None,
+            false,
+        );
+
+        assert!(
+            system_prompt.contains("中文输出偏好"),
+            "script preference should still be present for Chinese text"
+        );
+        assert!(
+            !system_prompt.contains("最终输出语言偏好")
+                && !system_prompt.contains("最終輸出語言偏好"),
+            "dictation polish must not translate just because UI/output preference is zh-TW"
+        );
+        assert!(user_prompt.contains("Please keep this sentence in English"));
+    }
+
+    #[test]
+    fn qa_prompt_may_still_use_output_language_preference() {
+        let system_prompt = compose_qa_system_prompt(
+            &["繁體中文".to_string()],
+            ChineseScriptPreference::Traditional,
+            OutputLanguagePreference::ZhTw,
+            None,
+        );
+
+        assert!(
+            system_prompt.contains("最終輸出語言偏好"),
+            "QA answers may still follow the configured answer language preference"
         );
     }
 

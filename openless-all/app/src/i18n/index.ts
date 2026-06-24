@@ -99,31 +99,31 @@ export function outputPrefsForLocale(
   if (resolved === 'zh-CN') {
     return {
       chineseScriptPreference: 'simplified',
-      outputLanguagePreference: 'zhCn',
+      outputLanguagePreference: 'auto',
     };
   }
   if (resolved === 'zh-TW') {
     return {
       chineseScriptPreference: 'traditional',
-      outputLanguagePreference: 'zhTw',
+      outputLanguagePreference: 'auto',
     };
   }
   if (resolved === 'en') {
     return {
       chineseScriptPreference: 'auto',
-      outputLanguagePreference: 'en',
+      outputLanguagePreference: 'auto',
     };
   }
   if (resolved === 'ja') {
     return {
       chineseScriptPreference: 'auto',
-      outputLanguagePreference: 'ja',
+      outputLanguagePreference: 'auto',
     };
   }
   if (resolved === 'ko') {
     return {
       chineseScriptPreference: 'auto',
-      outputLanguagePreference: 'ko',
+      outputLanguagePreference: 'auto',
     };
   }
   return {

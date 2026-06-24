@@ -174,7 +174,7 @@ export function HotkeySettingsProvider({ children }: { children: ReactNode }) {
         setPrefs(merged)
         void queueSetSettings(merged).catch((error) => {
             console.warn(
-                "[settings] sync locale output preferences failed",
+                "[settings] sync locale script preferences failed",
                 error,
             )
         })

@@ -1,5 +1,5 @@
 // 语言切换面板：跟随系统 / 简中 / 繁中 / 英文 / 日文 (Beta) / 韩文 (Beta)。
-// 切换语言同时把对应的 outputPrefs（中文偏好、输出语言）合并进 prefs。
+// 切换语言只同步中文简繁字形；一般语音输入的输出语言保持 auto，避免把英文听写翻成中文。
 
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
