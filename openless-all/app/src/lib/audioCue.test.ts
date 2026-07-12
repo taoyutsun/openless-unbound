@@ -2,7 +2,14 @@
 // （无独立 runner —— 在 tsc 类型检查下编译，必要时可用 tsx 直接跑）。
 // 播放/停止依赖 Web Audio 运行时，不在此单测覆盖；这里只钉住可被回归的音符规划。
 
-import { cueTotalDurationMs, recordStartCueTones, type CueTone } from './audioCue';
+import {
+  audioContextActionForState,
+  cueActionAfterResume,
+  cueTotalDurationMs,
+  recordStartCueTones,
+  shouldPlayDeferredCue,
+  type CueTone,
+} from './audioCue';
 
 function assert(cond: boolean, name: string) {
   if (!cond) throw new Error(`assertion failed: ${name}`);
@@ -43,6 +50,49 @@ function assertEqual<T>(actual: T, expected: T, name: string) {
   assertEqual(cueTotalDurationMs(flat), 260, 'total duration is last tone end (90 + 170)');
   assertEqual(cueTotalDurationMs([]), 0, 'empty cue has zero duration');
   assert(cueTotalDurationMs(recordStartCueTones()) > 0, 'start cue has positive total duration');
+}
+
+{
+  assertEqual(
+    shouldPlayDeferredCue({ superseded: true, stoppedWhileWaiting: false, elapsedMs: 10, lateThresholdMs: 400 }),
+    false,
+    'superseded cue does not play',
+  );
+  assertEqual(
+    shouldPlayDeferredCue({ superseded: false, stoppedWhileWaiting: true, elapsedMs: 120, lateThresholdMs: 400 }),
+    true,
+    'quick recording still gets a cue',
+  );
+  assertEqual(
+    shouldPlayDeferredCue({ superseded: false, stoppedWhileWaiting: true, elapsedMs: 800, lateThresholdMs: 400 }),
+    false,
+    'genuinely late cue is dropped',
+  );
+}
+
+{
+  assertEqual(audioContextActionForState('closed'), 'recreate', 'closed context is recreated');
+  assertEqual(audioContextActionForState('running'), 'ready', 'running context is ready');
+  assertEqual(audioContextActionForState('suspended'), 'resume', 'suspended context resumes');
+  assertEqual(audioContextActionForState('interrupted'), 'resume', 'interrupted context resumes');
+}
+
+{
+  assertEqual(
+    cueActionAfterResume({ runningAfterResume: true, shouldPlay: true, allowRecreate: true }),
+    'schedule',
+    'running context schedules the cue',
+  );
+  assertEqual(
+    cueActionAfterResume({ runningAfterResume: false, shouldPlay: true, allowRecreate: true }),
+    'recreate-retry',
+    'a context that will not wake is recreated',
+  );
+  assertEqual(
+    cueActionAfterResume({ runningAfterResume: false, shouldPlay: true, allowRecreate: false }),
+    'drop',
+    'the retry is bounded',
+  );
 }
 
 // 静默成功难以与「没跑」区分；直接 tsx 跑时给个明确通过信号。

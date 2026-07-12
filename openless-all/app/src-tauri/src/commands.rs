@@ -78,6 +78,14 @@ pub fn get_default_style_system_prompts() -> StyleSystemPrompts {
 trait SettingsWriter {
     fn read_settings(&self) -> UserPreferences;
     fn write_settings(&self, prefs: UserPreferences) -> Result<(), String>;
+    fn write_settings_preserving_current_style_preferences(
+        &self,
+        mut prefs: UserPreferences,
+    ) -> Result<(), String> {
+        let current = self.read_settings();
+        prefs.preserve_style_preferences_from(&current);
+        self.write_settings(prefs)
+    }
     fn sync_active_asr_provider(&self, provider: &str) -> Result<(), String>;
     fn refresh_dictation_hotkey(&self);
     fn refresh_qa_hotkey(&self);
@@ -94,6 +102,15 @@ impl SettingsWriter for Coordinator {
 
     fn write_settings(&self, prefs: UserPreferences) -> Result<(), String> {
         self.prefs().set(prefs).map_err(|e| e.to_string())
+    }
+
+    fn write_settings_preserving_current_style_preferences(
+        &self,
+        prefs: UserPreferences,
+    ) -> Result<(), String> {
+        self.prefs()
+            .set_preserving_current_style_preferences(prefs)
+            .map_err(|e| e.to_string())
     }
 
     fn sync_active_asr_provider(&self, provider: &str) -> Result<(), String> {
@@ -132,6 +149,13 @@ impl<T: SettingsWriter + ?Sized> SettingsWriter for Arc<T> {
 
     fn write_settings(&self, prefs: UserPreferences) -> Result<(), String> {
         (**self).write_settings(prefs)
+    }
+
+    fn write_settings_preserving_current_style_preferences(
+        &self,
+        prefs: UserPreferences,
+    ) -> Result<(), String> {
+        (**self).write_settings_preserving_current_style_preferences(prefs)
     }
 
     fn sync_active_asr_provider(&self, provider: &str) -> Result<(), String> {
@@ -182,12 +206,14 @@ fn persist_settings<T: SettingsWriter>(
     if active_asr_provider_changed {
         coord.sync_active_asr_provider(&active_asr_provider)?;
     }
-    if let Err(error) = coord.write_settings(prefs.clone()) {
+    if let Err(error) = coord.write_settings_preserving_current_style_preferences(prefs.clone()) {
         if active_asr_provider_changed {
             if let Err(rollback_error) =
                 coord.sync_active_asr_provider(&previous.active_asr_provider)
             {
-                coord.write_settings(prefs).map_err(|roll_forward_error| {
+                coord
+                    .write_settings_preserving_current_style_preferences(prefs)
+                    .map_err(|roll_forward_error| {
                     format!(
                         "{error}; additionally failed to restore active ASR provider: {rollback_error}; additionally failed to preserve active ASR provider consistency: {roll_forward_error}"
                     )
@@ -232,7 +258,8 @@ pub fn set_settings(
     // 广播给所有 webview。issue #205：QaPanel 跑在独立 webview，
     // 没有 HotkeySettingsContext，必须靠事件感知录音键变化，否则面板可见时
     // 用户改键会让浮窗里的 "{recordHotkey}" 文案一直停留在旧值。
-    persist_settings(&*coord, prefs.clone())?;
+    persist_settings(&*coord, prefs)?;
+    let prefs = coord.prefs().get();
     // refresh_tray_microphone_menu 内部会调用 NSStatusItem.set_menu，必须在主线程上跑。
     // set_settings 本身是同步 Tauri command，在 IPC handler 线程上执行；从这里直接调
     // 会触发 macOS 主线程断言或在 dispatch 队列上死锁，导致整个 UI 无响应（用户改
@@ -363,8 +390,8 @@ pub fn set_update_channel(
         return Ok(());
     }
     prefs.update_channel = channel;
-    persist_settings(&*coord, prefs.clone())?;
-    let _ = app.emit("prefs:changed", &prefs);
+    persist_settings(&*coord, prefs)?;
+    let _ = app.emit("prefs:changed", &coord.prefs().get());
     Ok(())
 }
 

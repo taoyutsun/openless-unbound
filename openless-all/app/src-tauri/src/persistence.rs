@@ -1276,6 +1276,18 @@ impl PreferencesStore {
         *guard = prefs;
         Ok(())
     }
+
+    pub fn set_preserving_current_style_preferences(
+        &self,
+        mut prefs: UserPreferences,
+    ) -> Result<()> {
+        let mut guard = self.state.lock();
+        prefs.preserve_style_preferences_from(&guard);
+        let json = serde_json::to_vec_pretty(&prefs).context("encode prefs failed")?;
+        atomic_write(&self.path, &json)?;
+        *guard = prefs;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2526,9 +2538,12 @@ mod tests {
     use super::{
         chunk_json_payload, chunk_skip_mask, list_vocab_presets, read_preferences,
         save_vocab_presets, sync_style_pack_preferences, validate_correction_rule_syntax,
-        KEYRING_CHUNK_MAX_UTF16_UNITS,
+        PreferencesStore, KEYRING_CHUNK_MAX_UTF16_UNITS,
     };
-    use crate::types::{builtin_style_packs, CustomStylePrompts, VocabPreset, VocabPresetStore};
+    use crate::types::{
+        builtin_style_packs, CustomStylePrompts, PolishMode, UserPreferences, VocabPreset,
+        VocabPresetStore,
+    };
     use std::fs;
     use std::path::PathBuf;
 
@@ -2615,6 +2630,41 @@ mod tests {
             Some(true)
         );
 
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn settings_save_preserves_current_style_preferences() {
+        let tmp: PathBuf =
+            std::env::temp_dir().join(format!("openless-style-prefs-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("preferences.json");
+        let current = UserPreferences {
+            default_mode: PolishMode::Light,
+            active_style_pack_id: "local.light-cleanup".to_string(),
+            ..UserPreferences::default()
+        };
+        let store = PreferencesStore {
+            path,
+            state: parking_lot::Mutex::new(current),
+        };
+        let incoming = UserPreferences {
+            default_mode: PolishMode::Formal,
+            active_style_pack_id: "builtin.formal".to_string(),
+            microphone_device_name: "External Mic".to_string(),
+            ..UserPreferences::default()
+        };
+
+        store
+            .set_preserving_current_style_preferences(incoming)
+            .expect("save prefs");
+
+        let saved = store.get();
+        assert_eq!(saved.default_mode, PolishMode::Light);
+        assert_eq!(saved.active_style_pack_id, "local.light-cleanup");
+        assert_eq!(saved.microphone_device_name, "External Mic");
+        let saved_on_disk = read_preferences(&store.path).expect("read saved prefs");
+        assert_eq!(saved_on_disk.active_style_pack_id, "local.light-cleanup");
         let _ = fs::remove_dir_all(&tmp);
     }
 

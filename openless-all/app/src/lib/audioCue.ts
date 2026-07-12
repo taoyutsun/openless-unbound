@@ -47,10 +47,45 @@ interface ActiveVoice {
   gain: GainNode;
 }
 let activeVoices: ActiveVoice[] = [];
-// 每次「关闭」或「新一轮播放」自增。suspended 时 play 会等 resume() 再排期，
-// 这个代号让挂起的 resume 回调能判断「等待期间是否已被叫停/被新一轮取代」，
-// 避免录音已经结束、提示音却姗姗来迟地响起来（冷启动 WebView 上快按热键可复现）。
-let playGeneration = 0;
+let playSeq = 0;
+let stopSeq = 0;
+
+const DEFERRED_CUE_LATE_THRESHOLD_MS = 400;
+
+function nowMs(): number {
+  return typeof performance !== 'undefined' ? performance.now() : 0;
+}
+
+export function shouldPlayDeferredCue(params: {
+  superseded: boolean;
+  stoppedWhileWaiting: boolean;
+  elapsedMs: number;
+  lateThresholdMs: number;
+}): boolean {
+  if (params.superseded) return false;
+  if (params.stoppedWhileWaiting && params.elapsedMs > params.lateThresholdMs) return false;
+  return true;
+}
+
+export type AudioContextAction = 'ready' | 'resume' | 'recreate';
+
+export function audioContextActionForState(state: string): AudioContextAction {
+  if (state === 'closed') return 'recreate';
+  if (state === 'running') return 'ready';
+  return 'resume';
+}
+
+export type CueAction = 'schedule' | 'recreate-retry' | 'drop';
+
+export function cueActionAfterResume(params: {
+  runningAfterResume: boolean;
+  shouldPlay: boolean;
+  allowRecreate: boolean;
+}): CueAction {
+  if (!params.shouldPlay) return 'drop';
+  if (params.runningAfterResume) return 'schedule';
+  return params.allowRecreate ? 'recreate-retry' : 'drop';
+}
 
 function resolveAudioContextCtor(): AudioContextCtor | null {
   if (typeof window === 'undefined') return null;
@@ -62,6 +97,10 @@ function resolveAudioContextCtor(): AudioContextCtor | null {
 function getContext(): AudioContext | null {
   const Ctor = resolveAudioContextCtor();
   if (!Ctor) return null;
+  if (sharedCtx && audioContextActionForState(sharedCtx.state) === 'recreate') {
+    sharedCtx = null;
+    activeVoices = [];
+  }
   if (!sharedCtx) {
     try {
       sharedCtx = new Ctor();
@@ -71,6 +110,16 @@ function getContext(): AudioContext | null {
     }
   }
   return sharedCtx;
+}
+
+function discardContext(ctx: AudioContext): void {
+  if (sharedCtx === ctx) sharedCtx = null;
+  activeVoices = [];
+  try {
+    void ctx.close().catch(() => undefined);
+  } catch {
+    // The context may already be closed or expose a non-Promise implementation.
+  }
 }
 
 // 停掉当前正在发声的节点（不影响 playGeneration —— 仅做去叠音 / 收尾）。
@@ -90,9 +139,9 @@ function stopVoices(): void {
   activeVoices = [];
 }
 
-/** 关闭/停止提示音：停掉在播节点，并作废任何还挂在 resume() 上、尚未排期的播放。 */
+/** 关闭/停止提示音，并标记等待 resume 的播放请求可能已经过期。 */
 export function stopAudioCue(): void {
-  playGeneration++;
+  stopSeq++;
   stopVoices();
 }
 
@@ -139,24 +188,43 @@ function scheduleCueVoices(ctx: AudioContext): void {
 
 /** 播放「开始录音」提示音。无 Web Audio 或被挂起且无法恢复时静默降级。 */
 export function playRecordStartCue(): void {
+  playRecordStartCueOnce(true);
+}
+
+function playRecordStartCueOnce(allowRecreate: boolean): void {
   const ctx = getContext();
   if (!ctx) return;
 
-  // WKWebView / WebView2 的 AudioContext 常处于 suspended：必须先 resume 再排期，
-  // 不能在 resume 未完成时就用冻结的 currentTime 排节点。resume() 失败也不抛（无声降级）。
-  if (ctx.state === 'suspended') {
-    const gen = ++playGeneration;
-    ctx
-      .resume()
-      .then(() => {
-        // 等待 resume 期间若已 stopAudioCue（录音结束）或有新一轮播放，本次作废，
-        // 否则会出现「录音已停，提示音却晚到」。
-        if (gen !== playGeneration) return;
-        scheduleCueVoices(ctx);
-      })
-      .catch(() => undefined);
+  if (audioContextActionForState(ctx.state) !== 'resume') {
+    scheduleCueVoices(ctx);
     return;
   }
 
-  scheduleCueVoices(ctx);
+  const myPlay = ++playSeq;
+  const stopAtRequest = stopSeq;
+  const requestedAt = nowMs();
+
+  const settle = (runningAfterResume: boolean): void => {
+    const action = cueActionAfterResume({
+      runningAfterResume,
+      shouldPlay: shouldPlayDeferredCue({
+        superseded: myPlay !== playSeq,
+        stoppedWhileWaiting: stopSeq !== stopAtRequest,
+        elapsedMs: nowMs() - requestedAt,
+        lateThresholdMs: DEFERRED_CUE_LATE_THRESHOLD_MS,
+      }),
+      allowRecreate,
+    });
+    if (action === 'schedule') {
+      scheduleCueVoices(ctx);
+    } else if (action === 'recreate-retry') {
+      discardContext(ctx);
+      playRecordStartCueOnce(false);
+    }
+  };
+
+  ctx
+    .resume()
+    .then(() => settle(ctx.state === 'running'))
+    .catch(() => settle(false));
 }
