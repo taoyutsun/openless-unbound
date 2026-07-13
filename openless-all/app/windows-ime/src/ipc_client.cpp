@@ -348,6 +348,19 @@ void OpenLessPipeServer::Start(OpenLessTextService* service) {
   }
 
   stop_requested_.store(false);
+  stop_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  io_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  if (stop_event_ == nullptr || io_event_ == nullptr) {
+    if (stop_event_ != nullptr) {
+      CloseHandle(stop_event_);
+      stop_event_ = nullptr;
+    }
+    if (io_event_ != nullptr) {
+      CloseHandle(io_event_);
+      io_event_ = nullptr;
+    }
+    return;
+  }
   pipe_name_ = PipeNameForCurrentThread();
   service_ = service;
   service_->AddRef();
@@ -356,10 +369,20 @@ void OpenLessPipeServer::Start(OpenLessTextService* service) {
 
 void OpenLessPipeServer::Stop() {
   stop_requested_.store(true);
+  if (stop_event_ != nullptr) {
+    SetEvent(stop_event_);
+  }
   if (thread_.joinable()) {
-    CancelSynchronousIo(thread_.native_handle());
-    WakePipe();
     thread_.join();
+  }
+
+  if (io_event_ != nullptr) {
+    CloseHandle(io_event_);
+    io_event_ = nullptr;
+  }
+  if (stop_event_ != nullptr) {
+    CloseHandle(stop_event_);
+    stop_event_ = nullptr;
   }
 
   if (service_ != nullptr) {
@@ -372,24 +395,14 @@ void OpenLessPipeServer::Run() {
   const std::wstring pipe_name = pipe_name_;
   while (!stop_requested_.load()) {
     HANDLE pipe = CreateNamedPipeW(
-        pipe_name.c_str(), PIPE_ACCESS_DUPLEX,
+        pipe_name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_MESSAGE | PIPE_READMODE_BYTE | PIPE_WAIT, 1,
         kPipeBufferSize, kPipeBufferSize, 0, nullptr);
     if (pipe == INVALID_HANDLE_VALUE) {
       return;
     }
 
-    {
-      std::lock_guard<std::mutex> lock(pipe_mutex_);
-      pipe_handle_ = pipe;
-    }
-
-    const BOOL connected =
-        ConnectNamedPipe(pipe, nullptr)
-            ? TRUE
-            : (GetLastError() == ERROR_PIPE_CONNECTED ? TRUE : FALSE);
-
-    if (connected && !stop_requested_.load()) {
+    if (WaitForClient(pipe) && !stop_requested_.load()) {
       std::string line;
       if (ReadJsonLine(pipe, &line)) {
         HandleSubmitLine(pipe, line);
@@ -399,14 +412,70 @@ void OpenLessPipeServer::Run() {
     FlushFileBuffers(pipe);
     DisconnectNamedPipe(pipe);
     CloseHandle(pipe);
+  }
+}
 
-    {
-      std::lock_guard<std::mutex> lock(pipe_mutex_);
-      if (pipe_handle_ == pipe) {
-        pipe_handle_ = INVALID_HANDLE_VALUE;
-      }
+bool OpenLessPipeServer::WaitForClient(HANDLE pipe) {
+  OVERLAPPED overlapped = {};
+  overlapped.hEvent = io_event_;
+  ResetEvent(io_event_);
+
+  if (ConnectNamedPipe(pipe, &overlapped)) {
+    return true;
+  }
+
+  const DWORD error = GetLastError();
+  if (error == ERROR_PIPE_CONNECTED) {
+    return true;
+  }
+  if (error != ERROR_IO_PENDING) {
+    return false;
+  }
+
+  const HANDLE wait_handles[2] = {io_event_, stop_event_};
+  const DWORD wait = WaitForMultipleObjects(2, wait_handles, FALSE, INFINITE);
+  if (wait == WAIT_OBJECT_0) {
+    DWORD transferred = 0;
+    return GetOverlappedResult(pipe, &overlapped, &transferred, FALSE) != 0;
+  }
+
+  CancelIoEx(pipe, &overlapped);
+  DWORD transferred = 0;
+  GetOverlappedResult(pipe, &overlapped, &transferred, TRUE);
+  return false;
+}
+
+bool OpenLessPipeServer::RunOverlapped(HANDLE pipe,
+                                       bool is_write,
+                                       void* buffer,
+                                       DWORD length,
+                                       DWORD* bytes) {
+  *bytes = 0;
+
+  OVERLAPPED overlapped = {};
+  overlapped.hEvent = io_event_;
+  ResetEvent(io_event_);
+
+  const BOOL started =
+      is_write ? WriteFile(pipe, buffer, length, nullptr, &overlapped)
+               : ReadFile(pipe, buffer, length, nullptr, &overlapped);
+  if (!started) {
+    const DWORD error = GetLastError();
+    if (error != ERROR_IO_PENDING) {
+      return false;
+    }
+
+    const HANDLE wait_handles[2] = {io_event_, stop_event_};
+    const DWORD wait = WaitForMultipleObjects(2, wait_handles, FALSE, INFINITE);
+    if (wait != WAIT_OBJECT_0) {
+      CancelIoEx(pipe, &overlapped);
+      DWORD drained = 0;
+      GetOverlappedResult(pipe, &overlapped, &drained, TRUE);
+      return false;
     }
   }
+
+  return GetOverlappedResult(pipe, &overlapped, bytes, FALSE) != 0;
 }
 
 bool OpenLessPipeServer::ReadJsonLine(HANDLE pipe, std::string* line) {
@@ -415,12 +484,8 @@ bool OpenLessPipeServer::ReadJsonLine(HANDLE pipe, std::string* line) {
 
   while (!stop_requested_.load() && line->size() < kMaxJsonLineBytes) {
     DWORD bytes_read = 0;
-    if (!ReadFile(pipe, buffer, sizeof(buffer), &bytes_read, nullptr)) {
-      const DWORD error = GetLastError();
-      if (error == ERROR_MORE_DATA && bytes_read > 0) {
-        line->append(buffer, buffer + bytes_read);
-        continue;
-      }
+    if (!RunOverlapped(pipe, /*is_write=*/false, buffer, sizeof(buffer),
+                       &bytes_read)) {
       return !line->empty();
     }
 
@@ -492,20 +557,8 @@ bool OpenLessPipeServer::WriteResult(HANDLE pipe,
   }
 
   DWORD bytes_written = 0;
-  return WriteFile(pipe, utf8_response.data(),
-                   static_cast<DWORD>(utf8_response.size()), &bytes_written,
-                   nullptr) &&
+  return RunOverlapped(pipe, /*is_write=*/true, utf8_response.data(),
+                       static_cast<DWORD>(utf8_response.size()),
+                       &bytes_written) &&
          bytes_written == utf8_response.size();
-}
-
-void OpenLessPipeServer::WakePipe() {
-  if (pipe_name_.empty()) {
-    return;
-  }
-  HANDLE pipe =
-      CreateFileW(pipe_name_.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-  if (pipe != INVALID_HANDLE_VALUE) {
-    CloseHandle(pipe);
-  }
 }

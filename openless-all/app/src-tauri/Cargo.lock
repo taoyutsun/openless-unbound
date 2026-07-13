@@ -1704,9 +1704,9 @@ dependencies = [
 
 [[package]]
 name = "foundry-local-sdk"
-version = "1.1.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f6f6b9ce8ef529348022814444562c54d7216417e6ed89af3d56807f52e5788"
+checksum = "16fc2dc5ba41aeb97864c9ca63976f81ad867cf26d191d8f018559b180581082"
 dependencies = [
  "async-openai",
  "futures-core",

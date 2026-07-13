@@ -1383,10 +1383,14 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         #[cfg(target_os = "windows")]
         ActiveAsr::FoundryLocalWhisper(local) => {
             debug_assert!(!uses_global_timeout);
-            match local
-                .transcribe(foundry_audio_transcribe_timeout_duration())
-                .await
-            {
+            let audio_secs = (local.buffer_duration_ms() as f64) / 1000.0;
+            let timeout_duration = windows_local_asr_transcribe_timeout(audio_secs);
+            log::info!(
+                "[coord] Foundry Local Whisper transcribe: audio={:.2}s timeout={}s",
+                audio_secs,
+                timeout_duration.as_secs()
+            );
+            match local.transcribe(timeout_duration).await {
                 Ok(r) => {
                     schedule_foundry_local_asr_release(inner, current_session_id);
                     r
@@ -1424,10 +1428,14 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         #[cfg(target_os = "windows")]
         ActiveAsr::SherpaOnnxLocal(local) => {
             debug_assert!(!uses_global_timeout);
-            match local
-                .transcribe(sherpa_audio_transcribe_timeout_duration())
-                .await
-            {
+            let audio_secs = (local.buffer_duration_ms() as f64) / 1000.0;
+            let timeout_duration = windows_local_asr_transcribe_timeout(audio_secs);
+            log::info!(
+                "[coord] sherpa-onnx transcribe: audio={:.2}s timeout={}s",
+                audio_secs,
+                timeout_duration.as_secs()
+            );
+            match local.transcribe(timeout_duration).await {
                 Ok(r) => {
                     schedule_sherpa_onnx_release(inner, current_session_id);
                     r

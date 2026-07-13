@@ -1,7 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <mutex>
 #include <string>
 #include <thread>
 #include <windows.h>
@@ -20,18 +19,23 @@ class OpenLessPipeServer {
 
  private:
   void Run();
+  bool WaitForClient(HANDLE pipe);
   bool ReadJsonLine(HANDLE pipe, std::string* line);
   void HandleSubmitLine(HANDLE pipe, const std::string& line);
   bool WriteResult(HANDLE pipe,
                    const std::wstring& session_id,
                    const wchar_t* status,
                    const wchar_t* error_code);
-  void WakePipe();
+  bool RunOverlapped(HANDLE pipe,
+                     bool is_write,
+                     void* buffer,
+                     DWORD length,
+                     DWORD* bytes);
 
   std::atomic<bool> stop_requested_{false};
   std::thread thread_;
-  std::mutex pipe_mutex_;
-  HANDLE pipe_handle_ = INVALID_HANDLE_VALUE;
+  HANDLE stop_event_ = nullptr;
+  HANDLE io_event_ = nullptr;
   std::wstring pipe_name_;
   OpenLessTextService* service_ = nullptr;
 };

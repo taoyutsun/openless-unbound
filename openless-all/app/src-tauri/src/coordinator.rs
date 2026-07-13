@@ -183,13 +183,19 @@ impl ActiveAsr {
             ActiveAsr::Whisper(asr) => Ok(asr.transcribe().await?),
             ActiveAsr::Bailian(asr) => Ok(asr.await_final_result().await?),
             #[cfg(target_os = "windows")]
-            ActiveAsr::FoundryLocalWhisper(asr) => Ok(asr
-                .transcribe(foundry_audio_transcribe_timeout_duration())
-                .await?),
+            ActiveAsr::FoundryLocalWhisper(asr) => {
+                let audio_secs = (asr.buffer_duration_ms() as f64) / 1000.0;
+                Ok(asr
+                    .transcribe(windows_local_asr_transcribe_timeout(audio_secs))
+                    .await?)
+            }
             #[cfg(target_os = "windows")]
-            ActiveAsr::SherpaOnnxLocal(asr) => Ok(asr
-                .transcribe(sherpa_audio_transcribe_timeout_duration())
-                .await?),
+            ActiveAsr::SherpaOnnxLocal(asr) => {
+                let audio_secs = (asr.buffer_duration_ms() as f64) / 1000.0;
+                Ok(asr
+                    .transcribe(windows_local_asr_transcribe_timeout(audio_secs))
+                    .await?)
+            }
             #[cfg(target_os = "macos")]
             ActiveAsr::Local(asr) => Ok(Arc::clone(asr).transcribe().await?),
         }
@@ -213,6 +219,14 @@ fn active_asr_await_timeout_duration(asr: &ActiveAsr) -> std::time::Duration {
         ActiveAsr::Whisper(w) => {
             let audio_secs = (w.buffer_duration_ms() as f64) / 1000.0;
             whisper_transcribe_timeout(audio_secs)
+        }
+        #[cfg(target_os = "windows")]
+        ActiveAsr::FoundryLocalWhisper(local) => {
+            windows_local_asr_transcribe_timeout((local.buffer_duration_ms() as f64) / 1000.0)
+        }
+        #[cfg(target_os = "windows")]
+        ActiveAsr::SherpaOnnxLocal(local) => {
+            windows_local_asr_transcribe_timeout((local.buffer_duration_ms() as f64) / 1000.0)
         }
         _ => std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS),
     }
@@ -1080,8 +1094,9 @@ impl Coordinator {
                 language_hint,
             );
             crate::recorder::AudioConsumer::consume_pcm_chunk(&provider, &pcm);
+            let audio_secs = (provider.buffer_duration_ms() as f64) / 1000.0;
             let raw = provider
-                .transcribe(foundry_audio_transcribe_timeout_duration())
+                .transcribe(windows_local_asr_transcribe_timeout(audio_secs))
                 .await
                 .map_err(|e| e.to_string())?;
             let release_session_id = inner.state.lock().session_id;
@@ -1112,8 +1127,9 @@ impl Coordinator {
             .await
             .map_err(|e| e.to_string())?;
             crate::recorder::AudioConsumer::consume_pcm_chunk(&provider, &pcm);
+            let audio_secs = (provider.buffer_duration_ms() as f64) / 1000.0;
             let raw = provider
-                .transcribe(sherpa_audio_transcribe_timeout_duration())
+                .transcribe(windows_local_asr_transcribe_timeout(audio_secs))
                 .await
                 .map_err(|e| e.to_string())?;
             let release_session_id = inner.state.lock().session_id;
@@ -3567,8 +3583,8 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
         Err(_) => {
             // 全局超时：最后的防线
             log::error!(
-                "[coord] QA: 全局超时 {} 秒 - 强制恢复",
-                COORDINATOR_GLOBAL_TIMEOUT_SECS
+                "[coord] QA: ASR 超时 {} 秒 - 强制恢复",
+                timeout_duration.as_secs()
             );
             // 清理 ASR session，避免资源泄漏
             asr.cancel();
@@ -4271,14 +4287,19 @@ mod tests {
         assert!(!asr_transcribe_uses_global_timeout(&active_asr));
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
-    fn foundry_audio_transcribe_timeout_is_separate_from_prepare() {
-        let timeout = foundry_audio_transcribe_timeout_duration();
-
+    fn windows_local_asr_timeout_floors_at_global_timeout_for_short_audio() {
         assert_eq!(
-            timeout,
+            windows_local_asr_transcribe_timeout(5.0),
             std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS)
+        );
+    }
+
+    #[test]
+    fn windows_local_asr_timeout_scales_with_audio_duration() {
+        assert_eq!(
+            windows_local_asr_transcribe_timeout(65.0),
+            std::time::Duration::from_secs(85)
         );
     }
 
@@ -4874,9 +4895,11 @@ const POST_SESSION_COOLDOWN_MS: u64 = 600;
 /// 只在 ASR 超时机制失效时作为最后的防线触发。
 const COORDINATOR_GLOBAL_TIMEOUT_SECS: u64 = 30;
 
-#[cfg(target_os = "windows")]
-fn foundry_audio_transcribe_timeout_duration() -> std::time::Duration {
-    std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS)
+fn windows_local_asr_transcribe_timeout(audio_secs: f64) -> std::time::Duration {
+    let secs = (audio_secs.ceil() as u64)
+        .saturating_add(20)
+        .max(COORDINATOR_GLOBAL_TIMEOUT_SECS);
+    std::time::Duration::from_secs(secs)
 }
 
 /// 本地 Qwen3-ASR 的动态转写超时。固定 15 秒在长录音（≥ 30s）+ 慢机器
@@ -4895,13 +4918,6 @@ fn whisper_transcribe_timeout(audio_secs: f64) -> std::time::Duration {
         .saturating_add(20)
         .max(COORDINATOR_GLOBAL_TIMEOUT_SECS);
     std::time::Duration::from_secs(secs)
-}
-
-/// sherpa-onnx offline batch 暂与 Foundry 同档；后续按 Windows 真机 CPU/模型
-/// 实测结果再调整。
-#[cfg(target_os = "windows")]
-fn sherpa_audio_transcribe_timeout_duration() -> std::time::Duration {
-    std::time::Duration::from_secs(COORDINATOR_GLOBAL_TIMEOUT_SECS)
 }
 
 /// 检查 begin_session 的 await 间隙是否被 cancel_session 打断。

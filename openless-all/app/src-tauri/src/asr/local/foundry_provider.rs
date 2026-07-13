@@ -23,6 +23,8 @@ use crate::asr::RawTranscript;
 #[cfg(target_os = "windows")]
 use super::foundry_runtime::FoundryLocalRuntime;
 
+const FOUNDRY_WHISPER_CHUNK_LIMIT_MS: u64 = 30_000;
+
 pub struct FoundryLocalWhisperAsr {
     #[cfg(target_os = "windows")]
     runtime: Arc<FoundryLocalRuntime>,
@@ -70,6 +72,10 @@ impl FoundryLocalWhisperAsr {
         self.language_hint.as_deref()
     }
 
+    pub fn buffer_duration_ms(&self) -> u64 {
+        pcm_duration_ms(&self.buffer.lock())
+    }
+
     pub async fn transcribe(&self, audio_timeout: std::time::Duration) -> Result<RawTranscript> {
         let cancel_generation = self.cancel_generation.load(Ordering::SeqCst);
         let pcm = self.buffer.lock().clone();
@@ -108,26 +114,57 @@ impl FoundryLocalWhisperAsr {
 
         #[cfg(target_os = "windows")]
         {
-            let wav_file = TempWavFile::create(pcm)?;
-            let text = self
-                .runtime
-                .transcribe_audio_file(
-                    &self.model_alias,
-                    &self.runtime_source,
-                    self.language_hint(),
-                    wav_file.path(),
-                    audio_timeout,
-                )
-                .await
-                .with_context(|| {
-                    format!(
-                        "transcribe audio file with Foundry Local Whisper model {}",
-                        self.model_alias
+            let chunks = crate::asr::whisper::split_pcm_by_duration(
+                pcm,
+                Some(FOUNDRY_WHISPER_CHUNK_LIMIT_MS),
+            );
+            let deadline = std::time::Instant::now()
+                .checked_add(audio_timeout)
+                .ok_or_else(|| anyhow::anyhow!("Foundry Local Whisper timeout is too large"))?;
+            if chunks.len() > 1 {
+                log::info!(
+                    "[foundry-asr] splitting {:.2}s audio into {} chunks (limit={}ms)",
+                    duration_ms as f64 / 1000.0,
+                    chunks.len(),
+                    FOUNDRY_WHISPER_CHUNK_LIMIT_MS
+                );
+            }
+
+            let mut texts = Vec::with_capacity(chunks.len());
+            for (index, chunk) in chunks.iter().enumerate() {
+                let wav_file = TempWavFile::create(chunk)?;
+                let remaining_timeout =
+                    remaining_transcribe_timeout(deadline, std::time::Instant::now())
+                        .with_context(|| {
+                            format!(
+                                "Foundry Local Whisper total timeout exhausted before chunk {}/{}",
+                                index + 1,
+                                chunks.len()
+                            )
+                        })?;
+                let text = self
+                    .runtime
+                    .transcribe_audio_file(
+                        &self.model_alias,
+                        &self.runtime_source,
+                        self.language_hint(),
+                        wav_file.path(),
+                        remaining_timeout,
                     )
-                })?;
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "transcribe Foundry Local Whisper chunk {}/{} with model {}",
+                            index + 1,
+                            chunks.len(),
+                            self.model_alias
+                        )
+                    })?;
+                texts.push(trim_transcript_text(&text));
+            }
 
             Ok(RawTranscript {
-                text: trim_transcript_text(&text),
+                text: crate::asr::whisper::join_transcript_chunks(&texts),
                 duration_ms,
             })
         }
@@ -149,6 +186,16 @@ impl crate::recorder::AudioConsumer for FoundryLocalWhisperAsr {
 
 fn pcm_duration_ms(pcm: &[u8]) -> u64 {
     (pcm.len() as u64 / 2) * 1000 / 16_000
+}
+
+fn remaining_transcribe_timeout(
+    deadline: std::time::Instant,
+    now: std::time::Instant,
+) -> Result<std::time::Duration> {
+    deadline
+        .checked_duration_since(now)
+        .filter(|duration| !duration.is_zero())
+        .ok_or_else(|| anyhow::anyhow!("Foundry Local Whisper total timeout exhausted"))
 }
 
 fn pcm_to_wav(pcm: &[u8]) -> Vec<u8> {
@@ -291,6 +338,49 @@ mod tests {
         assert_eq!(&wav[0..4], b"RIFF");
         assert_eq!(u32::from_le_bytes(wav[40..44].try_into().unwrap()), 4);
         assert_eq!(&wav[44..], &[0x01, 0x00, 0xff, 0x7f]);
+    }
+
+    #[test]
+    fn foundry_provider_splits_long_pcm_at_whisper_window() {
+        let pcm = vec![0u8; 32_000 * 65];
+        let chunks = crate::asr::whisper::split_pcm_by_duration(
+            &pcm,
+            Some(super::FOUNDRY_WHISPER_CHUNK_LIMIT_MS),
+        );
+
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].len(), 32_000 * 30);
+        assert_eq!(chunks[1].len(), 32_000 * 30);
+        assert_eq!(chunks[2].len(), 32_000 * 5);
+    }
+
+    #[test]
+    fn foundry_chunk_timeout_uses_remaining_total_budget() {
+        let started = std::time::Instant::now();
+        let deadline = started + std::time::Duration::from_secs(85);
+
+        assert_eq!(
+            super::remaining_transcribe_timeout(
+                deadline,
+                started + std::time::Duration::from_secs(30),
+            )
+            .unwrap(),
+            std::time::Duration::from_secs(55)
+        );
+        assert!(super::remaining_transcribe_timeout(deadline, deadline).is_err());
+    }
+
+    #[test]
+    fn foundry_provider_reports_buffer_duration_without_consuming() {
+        #[cfg(target_os = "windows")]
+        let (provider, _) = test_provider();
+        #[cfg(not(target_os = "windows"))]
+        let provider = test_provider();
+
+        provider.consume_pcm_chunk(&vec![0u8; 32_000]);
+
+        assert_eq!(provider.buffer_duration_ms(), 1000);
+        assert_eq!(provider.buffer.lock().len(), 32_000);
     }
 
     #[cfg(target_os = "windows")]
