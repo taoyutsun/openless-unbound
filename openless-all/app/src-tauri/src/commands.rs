@@ -1,6 +1,7 @@
 ﻿//! Tauri command surface — every IPC entry the React UI invokes lives here.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -965,18 +966,108 @@ pub async fn list_provider_models(kind: String) -> Result<ProviderModelsResult, 
     }
     if kind == "llm" && CredentialsVault::get_active_llm() == CODEX_OAUTH_PROVIDER_ID {
         return Ok(ProviderModelsResult {
-            models: vec![
-                CODEX_DEFAULT_MODEL.to_string(),
-                "gpt-5.3-codex".to_string(),
-                "gpt-5.4".to_string(),
-                "gpt-5.5".to_string(),
-            ],
+            models: codex_oauth_models(),
         });
     }
     let config = read_openai_provider_config(&kind)?;
     fetch_provider_models(&config)
         .await
         .map(|models| ProviderModelsResult { models })
+}
+
+fn codex_oauth_models() -> Vec<String> {
+    if let Some(path) = codex_models_cache_path() {
+        match std::fs::read_to_string(path)
+            .map_err(|error| error.to_string())
+            .and_then(|body| parse_codex_cached_models(&body))
+        {
+            Ok(models) if !models.is_empty() => return models,
+            Ok(_) => log::warn!("[provider-check] Codex model cache contains no visible models"),
+            Err(error) => log::warn!("[provider-check] Codex model cache unavailable: {error}"),
+        }
+    }
+    codex_oauth_fallback_models()
+}
+
+fn codex_models_cache_path() -> Option<PathBuf> {
+    if let Some(path) = non_empty_env_path("OPENLESS_CODEX_MODELS_CACHE_PATH") {
+        return Some(path);
+    }
+    if let Some(auth_path) = non_empty_env_path("OPENLESS_CODEX_AUTH_PATH") {
+        return auth_path
+            .parent()
+            .map(|parent| parent.join("models_cache.json"));
+    }
+    if let Some(codex_home) = non_empty_env_path("CODEX_HOME") {
+        return Some(codex_home.join("models_cache.json"));
+    }
+    codex_user_home_dir().map(|home| home.join(".codex").join("models_cache.json"))
+}
+
+fn codex_user_home_dir() -> Option<PathBuf> {
+    if let Some(home) = non_empty_env_path("HOME") {
+        return Some(home);
+    }
+    if let Some(userprofile) = non_empty_env_path("USERPROFILE") {
+        return Some(userprofile);
+    }
+    let drive = std::env::var_os("HOMEDRIVE")?;
+    let path = std::env::var_os("HOMEPATH")?;
+    let drive = drive.to_string_lossy();
+    let path = path.to_string_lossy();
+    if drive.trim().is_empty() || path.trim().is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(format!("{drive}{path}")))
+}
+
+fn non_empty_env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name).and_then(|value| {
+        let value = value.to_string_lossy();
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+    })
+}
+
+fn parse_codex_cached_models(body: &str) -> Result<Vec<String>, String> {
+    let root: Value = serde_json::from_str(body)
+        .map_err(|error| format!("Codex model cache is not valid JSON: {error}"))?;
+    let entries = root
+        .get("models")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Codex model cache is missing the models array".to_string())?;
+    let mut seen = HashSet::new();
+    let mut models = Vec::new();
+    for entry in entries {
+        if entry.get("visibility").and_then(Value::as_str) != Some("list") {
+            continue;
+        }
+        let Some(slug) = entry.get("slug").and_then(Value::as_str).map(str::trim) else {
+            continue;
+        };
+        if !slug.is_empty() && seen.insert(slug.to_string()) {
+            models.push(slug.to_string());
+        }
+    }
+    if models.is_empty() {
+        return Err("Codex model cache contains no visible models".to_string());
+    }
+    Ok(models)
+}
+
+fn codex_oauth_fallback_models() -> Vec<String> {
+    [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        CODEX_DEFAULT_MODEL,
+        "gpt-5.3-codex",
+        "gpt-5.4",
+        "gpt-5.5",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }
 
 struct ProviderConfig {
@@ -3689,9 +3780,10 @@ mod tests {
     use super::{
         active_asr_is_keyless_for_validation, active_foundry_model_from_prefs,
         active_sherpa_model_from_prefs, asr_configured_for_provider, asr_transcriptions_url,
-        fetch_provider_models, is_gemini_base_url, is_valid_local_pack_id, is_valid_session_id,
-        llm_configured_for_provider, local_asr_release_plan_for_provider, models_url,
-        normalize_foundry_language_hint, normalize_sherpa_language_hint, parse_gemini_model_ids,
+        codex_oauth_fallback_models, fetch_provider_models, is_gemini_base_url,
+        is_valid_local_pack_id, is_valid_session_id, llm_configured_for_provider,
+        local_asr_release_plan_for_provider, models_url, normalize_foundry_language_hint,
+        normalize_sherpa_language_hint, parse_codex_cached_models, parse_gemini_model_ids,
         parse_latest_beta_from_atom, parse_model_ids, persist_settings,
         release_foundry_runtime_if_inactive, release_sherpa_runtime_if_inactive,
         validate_foundry_model_alias, validate_sherpa_model_alias, ProviderConfig, SettingsWriter,
@@ -4711,6 +4803,37 @@ mod tests {
   </entry>
 </feed>"#;
         assert!(parse_latest_beta_from_atom(body).is_none());
+    }
+
+    #[test]
+    fn parse_codex_cached_models_keeps_only_visible_unique_slugs() {
+        let body = r#"{
+            "models": [
+                {"slug":"gpt-5.6-sol","visibility":"list"},
+                {"slug":"gpt-5.6-terra","visibility":"list"},
+                {"slug":"codex-auto-review","visibility":"hide"},
+                {"slug":"gpt-5.6-sol","visibility":"list"},
+                {"slug":"  gpt-5.6-luna  ","visibility":"list"},
+                {"slug":"gpt-internal"}
+            ]
+        }"#;
+
+        assert_eq!(
+            parse_codex_cached_models(body).unwrap(),
+            vec![
+                "gpt-5.6-sol".to_string(),
+                "gpt-5.6-terra".to_string(),
+                "gpt-5.6-luna".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_oauth_fallback_models_include_gpt_5_6_family() {
+        let models = codex_oauth_fallback_models();
+        for expected in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+            assert!(models.iter().any(|model| model == expected));
+        }
     }
 
     #[tokio::test]

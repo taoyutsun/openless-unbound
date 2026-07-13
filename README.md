@@ -55,6 +55,7 @@ OpenLess Unbound 是基於 [OpenLess](https://github.com/Open-Less/openless) 的
 - Windows Foundry Local Whisper 更新至相容的 1.2.1 runtime，長錄音會以 30 秒片段辨識並合併，等待時間也會依音訊長度調整。
 - Windows 輸入法 IPC 改用可取消的 overlapped I/O，降低關閉或重新啟動程式時背景執行緒卡住的機率；繁體中文台灣 TSF profile 維持不變。
 - 自訂 OpenAI-compatible LLM provider 可設定額外 HTTP Headers，套用於一般潤色、模型清單與劃詞追問的獨立自訂 provider。
+- Codex OAuth 的模型清單優先讀取本機 Codex `models_cache.json`，可跟隨帳號目前可用模型；快取不可用時則使用包含 GPT-5.6 Sol、Terra、Luna 的內建清單。
 - 強化錄音提示音恢復、設定寫入競態保護，以及歷史記錄原文／潤色結果的複製行為。
 
 本次仍不納入 Android APK runtime、手機遠端輸入、Less Computer / Cloud Agent 與大規模 mobile UI，避免增加目前 Windows 版本不需要的依賴與風險。

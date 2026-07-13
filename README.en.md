@@ -55,6 +55,7 @@ This fork keeps that foundation and focuses on practical constraints we ran into
 - Updates Windows Foundry Local Whisper to the compatible 1.2.1 runtime, transcribes long recordings in 30-second chunks, and scales timeouts with audio duration.
 - Moves Windows IME IPC to cancellable overlapped I/O to reduce shutdown or restart hangs while preserving the Traditional Chinese Taiwan TSF profile.
 - Lets custom OpenAI-compatible LLM providers define extra HTTP headers for regular polishing, model listing, and the independent custom Selection Q&A provider.
+- Loads the Codex OAuth model list from the local Codex `models_cache.json` when available, with a built-in fallback that includes GPT-5.6 Sol, Terra, and Luna.
 - Improves audio cue recovery, protects style settings from stale concurrent writes, and makes copying raw or polished history text more reliable.
 
 Android APK runtime, mobile remote input, Less Computer / Cloud Agent, and large mobile UI changes remain excluded to avoid adding dependencies and risk that the Windows build does not need.
