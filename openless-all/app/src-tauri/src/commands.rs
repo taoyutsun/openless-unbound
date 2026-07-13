@@ -1,11 +1,14 @@
 ﻿//! Tauri command surface — every IPC entry the React UI invokes lives here.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
+
+const LLM_EXTRA_HEADERS_ACCOUNT: &str = "ark.extra_headers";
 
 use crate::asr::local::foundry::{
     model_alias_is_known, FoundryCatalogModel, FoundryPrepareProgressPayload, FoundryRuntimeStatus,
@@ -856,6 +859,11 @@ async fn release_sherpa_runtime_if_inactive(
 #[tauri::command]
 pub fn set_credential(window: Window, account: String, value: String) -> Result<(), String> {
     ensure_main_window(&window)?;
+    if account == LLM_EXTRA_HEADERS_ACCOUNT {
+        CredentialsVault::set_active_llm_extra_headers_json(&value).map_err(|e| e.to_string())?;
+        let _ = window.emit("credentials:changed", ());
+        return Ok(());
+    }
     let acc = parse_account(&account)?;
     if value.is_empty() {
         CredentialsVault::remove(acc).map_err(|e| e.to_string())
@@ -909,6 +917,9 @@ pub fn set_active_llm_provider(provider: String) -> Result<(), String> {
 #[tauri::command]
 pub fn read_credential(window: Window, account: String) -> Result<Option<String>, String> {
     ensure_main_window(&window)?;
+    if account == LLM_EXTRA_HEADERS_ACCOUNT {
+        return CredentialsVault::get_active_llm_extra_headers_json().map_err(|e| e.to_string());
+    }
     let acc = parse_account(&account)?;
     CredentialsVault::get(acc).map_err(|e| e.to_string())
 }
@@ -971,6 +982,7 @@ pub async fn list_provider_models(kind: String) -> Result<ProviderModelsResult, 
 struct ProviderConfig {
     base_url: String,
     api_key: String,
+    extra_headers: HashMap<String, String>,
 }
 
 fn read_openai_provider_config(kind: &str) -> Result<ProviderConfig, String> {
@@ -993,13 +1005,22 @@ fn read_openai_provider_config(kind: &str) -> Result<ProviderConfig, String> {
     let base_url = CredentialsVault::get(endpoint_account)
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
+    let extra_headers = if kind == "llm" {
+        CredentialsVault::get_active_llm_extra_headers()
+    } else {
+        HashMap::new()
+    };
     if api_key_required && api_key.trim().is_empty() {
         return Err("API Key 为空".to_string());
     }
     if base_url.trim().is_empty() {
         return Err("Endpoint 为空".to_string());
     }
-    Ok(ProviderConfig { base_url, api_key })
+    Ok(ProviderConfig {
+        base_url,
+        api_key,
+        extra_headers,
+    })
 }
 
 async fn validate_llm_provider() -> Result<(), String> {
@@ -1051,7 +1072,8 @@ async fn validate_llm_provider() -> Result<(), String> {
             config.api_key,
             model,
         )
-        .with_thinking_enabled(llm_thinking_enabled),
+        .with_thinking_enabled(llm_thinking_enabled)
+        .with_extra_headers(config.extra_headers),
     );
     provider
         .polish(
@@ -1289,6 +1311,9 @@ async fn fetch_provider_models(config: &ProviderConfig) -> Result<Vec<String>, S
         } else {
             request = request.header("Authorization", format!("Bearer {}", config.api_key));
         }
+    }
+    for (key, value) in &config.extra_headers {
+        request = request.header(key.as_str(), value.as_str());
     }
     let response = request.send().await.map_err(|e| {
         if e.is_timeout() {
@@ -3675,6 +3700,7 @@ mod tests {
     use crate::types::{
         ComboBinding, HotkeyBinding, HotkeyMode, HotkeyTrigger, ShortcutBinding, UserPreferences,
     };
+    use std::collections::HashMap;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::Mutex;
@@ -4721,11 +4747,48 @@ mod tests {
         let models = fetch_provider_models(&ProviderConfig {
             base_url: format!("http://{}", addr),
             api_key: String::new(),
+            extra_headers: HashMap::new(),
         })
         .await
         .unwrap();
 
         assert_eq!(models, vec!["m1".to_string(), "m2".to_string()]);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn fetch_provider_models_sends_custom_headers() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 8192];
+            let n = stream.read(&mut buf).unwrap();
+            let request = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+            assert!(request.contains("x-openless-test: custom-value"));
+
+            let body = r#"{"data":[{"id":"m1"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let models = fetch_provider_models(&ProviderConfig {
+            base_url: format!("http://{}", addr),
+            api_key: String::new(),
+            extra_headers: HashMap::from([(
+                "X-OpenLess-Test".to_string(),
+                "custom-value".to_string(),
+            )]),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(models, vec!["m1".to_string()]);
         server.join().unwrap();
     }
 

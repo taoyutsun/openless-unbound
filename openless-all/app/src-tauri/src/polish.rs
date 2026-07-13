@@ -64,6 +64,11 @@ impl OpenAICompatibleConfig {
         self.thinking_enabled = enabled;
         self
     }
+
+    pub fn with_extra_headers(mut self, headers: HashMap<String, String>) -> Self {
+        self.extra_headers = headers;
+        self
+    }
 }
 
 #[derive(Debug, Error)]

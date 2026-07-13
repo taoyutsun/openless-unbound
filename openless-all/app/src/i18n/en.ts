@@ -658,6 +658,8 @@ export const en: typeof zhCN = {
       apiKeyLabel: 'API Key',
       baseUrlLabel: 'Base URL',
       modelLabel: 'Model',
+      extraHeadersLabel: 'Extra headers',
+      extraHeadersPlaceholder: '{"X-Custom-Header":"value"}',
       thinkingModeLabel: 'Thinking',
       thinkingModeOn: 'On',
       thinkingModeOff: 'Off',

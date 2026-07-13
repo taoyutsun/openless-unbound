@@ -13,6 +13,7 @@
 
 use std::fs;
 use std::io::{Read, Write};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -1290,6 +1291,93 @@ impl PreferencesStore {
     }
 }
 
+const RESERVED_EXTRA_HEADER_NAMES: &[&str] = &[
+    "authorization",
+    "content-type",
+    "accept",
+    "host",
+    "content-length",
+];
+
+fn active_llm_extra_headers(root: &CredsRoot) -> HashMap<String, String> {
+    root.providers
+        .llm
+        .get(&root.active.llm)
+        .and_then(|entry| entry.extraHeaders.clone())
+        .unwrap_or_default()
+}
+
+fn active_llm_extra_headers_json(root: &CredsRoot) -> Result<Option<String>> {
+    let headers = active_llm_extra_headers(root);
+    if headers.is_empty() {
+        return Ok(None);
+    }
+    let ordered = headers.into_iter().collect::<BTreeMap<_, _>>();
+    serde_json::to_string_pretty(&ordered)
+        .map(Some)
+        .context("encode LLM extra headers")
+}
+
+fn parse_extra_headers_json(value: &str) -> Result<HashMap<String, String>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let raw: HashMap<String, serde_json::Value> =
+        serde_json::from_str(trimmed).context("extra headers must be a JSON object")?;
+    let mut headers = HashMap::new();
+    for (key, value) in raw {
+        let key = key.trim();
+        if key.is_empty() {
+            anyhow::bail!("extra header name cannot be empty");
+        }
+        if !is_valid_header_name(key) {
+            anyhow::bail!("invalid extra header name: {key}");
+        }
+        if RESERVED_EXTRA_HEADER_NAMES
+            .iter()
+            .any(|reserved| key.eq_ignore_ascii_case(reserved))
+        {
+            anyhow::bail!("reserved extra header name cannot be overridden: {key}");
+        }
+        let Some(value) = value.as_str() else {
+            anyhow::bail!("extra header value for {key} must be a string");
+        };
+        if value.contains('\r') || value.contains('\n') {
+            anyhow::bail!("extra header value for {key} cannot contain line breaks");
+        }
+        headers.insert(key.to_string(), value.to_string());
+    }
+    Ok(headers)
+}
+
+fn is_valid_header_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.bytes().all(|b| {
+            matches!(
+                b,
+                b'!' | b'#'
+                    | b'$'
+                    | b'%'
+                    | b'&'
+                    | b'\''
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'.'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'|'
+                    | b'~'
+                    | b'0'..=b'9'
+                    | b'a'..=b'z'
+                    | b'A'..=b'Z'
+            )
+        })
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StylePackArchiveManifest {
@@ -2443,6 +2531,7 @@ pub struct LlmProviderCredentials {
     pub api_key: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
+    pub extra_headers: HashMap<String, String>,
 }
 
 /// 凭据存储——系统凭据库；旧 JSON 文件只作为迁移来源。
@@ -2500,6 +2589,29 @@ impl CredentialsVault {
         load_credentials().active.llm
     }
 
+    pub fn get_active_llm_extra_headers() -> HashMap<String, String> {
+        let _guard = credentials_lock().lock();
+        active_llm_extra_headers(&load_credentials())
+    }
+
+    pub fn get_active_llm_extra_headers_json() -> Result<Option<String>> {
+        let _guard = credentials_lock().lock();
+        active_llm_extra_headers_json(&load_credentials())
+    }
+
+    pub fn set_active_llm_extra_headers_json(value: &str) -> Result<()> {
+        let headers = parse_extra_headers_json(value)?;
+        let _guard = credentials_lock().lock();
+        let mut root = load_credentials_for_update()?;
+        let entry = root.providers.llm.entry(root.active.llm.clone()).or_default();
+        entry.extraHeaders = if headers.is_empty() {
+            None
+        } else {
+            Some(headers)
+        };
+        save_credentials(&root)
+    }
+
     pub fn get_llm_provider_credentials(id: &str) -> Result<LlmProviderCredentials> {
         let _guard = credentials_lock().lock();
         let root = load_credentials();
@@ -2512,6 +2624,7 @@ impl CredentialsVault {
                 api_key: pick(&entry.apiKey),
                 model: pick(&entry.model),
                 base_url: pick(&entry.baseURL),
+                extra_headers: entry.extraHeaders.clone().unwrap_or_default(),
             })
             .unwrap_or_default())
     }
@@ -2537,8 +2650,8 @@ impl CredentialsVault {
 mod tests {
     use super::{
         chunk_json_payload, chunk_skip_mask, list_vocab_presets, read_preferences,
-        save_vocab_presets, sync_style_pack_preferences, validate_correction_rule_syntax,
-        PreferencesStore, KEYRING_CHUNK_MAX_UTF16_UNITS,
+        parse_extra_headers_json, save_vocab_presets, sync_style_pack_preferences,
+        validate_correction_rule_syntax, PreferencesStore, KEYRING_CHUNK_MAX_UTF16_UNITS,
     };
     use crate::types::{
         builtin_style_packs, CustomStylePrompts, PolishMode, UserPreferences, VocabPreset,
@@ -2561,6 +2674,33 @@ mod tests {
         assert!(chunks
             .iter()
             .all(|chunk| chunk.encode_utf16().count() <= KEYRING_CHUNK_MAX_UTF16_UNITS));
+    }
+
+    #[test]
+    fn parse_extra_headers_json_accepts_string_map() {
+        let headers = parse_extra_headers_json(
+            r#"{"X-Title":"OpenLess Unbound","HTTP-Referer":"https://example.com"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            headers.get("X-Title").map(String::as_str),
+            Some("OpenLess Unbound")
+        );
+        assert_eq!(
+            headers.get("HTTP-Referer").map(String::as_str),
+            Some("https://example.com")
+        );
+    }
+
+    #[test]
+    fn parse_extra_headers_json_rejects_unsafe_values() {
+        for value in [
+            r#"{"Authorization":"Bearer secret"}"#,
+            r#"{"X-Test":123}"#,
+            "{\"X-Test\":\"ok\\r\\nInjected: yes\"}",
+        ] {
+            assert!(parse_extra_headers_json(value).is_err(), "accepted {value}");
+        }
     }
 
     #[test]

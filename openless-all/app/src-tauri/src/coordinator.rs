@@ -4060,8 +4060,13 @@ fn build_llm_provider(
         .trim_end_matches("/chat/completions")
         .trim_end_matches('/')
         .to_string();
+    let extra_headers = provider_credentials
+        .as_ref()
+        .map(|credentials| credentials.extra_headers.clone())
+        .unwrap_or_else(CredentialsVault::get_active_llm_extra_headers);
     let config = OpenAICompatibleConfig::new(active, "OpenLess LLM", base_url, api_key, model)
-        .with_thinking_enabled(llm_thinking_enabled);
+        .with_thinking_enabled(llm_thinking_enabled)
+        .with_extra_headers(extra_headers);
     Ok(ActiveLLMProvider::OpenAI(OpenAICompatibleLLMProvider::new(
         config,
     )))
