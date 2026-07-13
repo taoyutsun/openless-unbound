@@ -50,6 +50,15 @@ OpenLess Unbound 是基於 [OpenLess](https://github.com/Open-Less/openless) 的
 
 ## 近期同步內容
 
+`v1.3.14-1` 選擇性整合上游 OpenLess 1.3.14 中適合 Windows 與 Unbound 主線的修正，並保留本 fork 的既有功能：
+
+- Windows Foundry Local Whisper 更新至相容的 1.2.1 runtime，長錄音會以 30 秒片段辨識並合併，等待時間也會依音訊長度調整。
+- Windows 輸入法 IPC 改用可取消的 overlapped I/O，降低關閉或重新啟動程式時背景執行緒卡住的機率；繁體中文台灣 TSF profile 維持不變。
+- 自訂 OpenAI-compatible LLM provider 可設定額外 HTTP Headers，套用於一般潤色、模型清單與劃詞追問的獨立自訂 provider。
+- 強化錄音提示音恢復、設定寫入競態保護，以及歷史記錄原文／潤色結果的複製行為。
+
+本次仍不納入 Android APK runtime、手機遠端輸入、Less Computer / Cloud Agent 與大規模 mobile UI，避免增加目前 Windows 版本不需要的依賴與風險。
+
 `v1.3.11-2` 修正繁體中文強制字形轉換使用一般 `s2t` 導致「吃」被轉成「喫」的問題，改用台灣繁體字形轉換，讓「吃飯」維持台灣日常用字；同時修正一般語音輸入在介面語言為繁體中文時，LLM 潤色階段可能把英文口語內容翻成中文的問題。介面語言現在只同步中文字形偏好；未啟用翻譯時，語音輸入會保留原本說出的語言與中英夾雜內容。
 
 `v1.3.11-1` 是一個低風險 ASR 穩定性同步版本，先整合已完成測試的 provider 與 timeout 改善，同時保留本 fork 的劃詞追問 provider 可配置性、Codex OAuth、繁體中文 TSF profile 與 portable DLL 打包修正：

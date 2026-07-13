@@ -50,6 +50,15 @@ This fork keeps that foundation and focuses on practical constraints we ran into
 
 ## Recent Sync
 
+`v1.3.14-1` selectively integrates upstream OpenLess 1.3.14 fixes that fit the Windows and Unbound mainline while retaining this fork's existing behavior:
+
+- Updates Windows Foundry Local Whisper to the compatible 1.2.1 runtime, transcribes long recordings in 30-second chunks, and scales timeouts with audio duration.
+- Moves Windows IME IPC to cancellable overlapped I/O to reduce shutdown or restart hangs while preserving the Traditional Chinese Taiwan TSF profile.
+- Lets custom OpenAI-compatible LLM providers define extra HTTP headers for regular polishing, model listing, and the independent custom Selection Q&A provider.
+- Improves audio cue recovery, protects style settings from stale concurrent writes, and makes copying raw or polished history text more reliable.
+
+Android APK runtime, mobile remote input, Less Computer / Cloud Agent, and large mobile UI changes remain excluded to avoid adding dependencies and risk that the Windows build does not need.
+
 `v1.3.11-2` fixes a Traditional Chinese conversion regression where the general `s2t` table changed `吃` into the less common `喫`. The app now uses the Taiwan Traditional conversion table so everyday Taiwan wording such as `吃飯` stays intact. It also fixes a dictation polish regression where using the Traditional Chinese UI could cause English speech to be rewritten into Chinese. The UI locale now only syncs the Chinese script preference; normal dictation keeps the spoken language and mixed Chinese-English text unless translation is explicitly enabled.
 
 `v1.3.11-1` is a low-risk ASR stability sync. It brings over the provider and timeout changes that have already been tested, while keeping this fork's configurable Selection Q&A provider routing, Codex OAuth support, Traditional Chinese TSF profile, and portable DLL packaging fix:
