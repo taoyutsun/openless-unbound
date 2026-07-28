@@ -129,6 +129,26 @@ assert.match(wixFragment, /RegisterOpenLessImeX64/, "MSI should register x64 Ope
 assert.match(wixFragment, /RegisterOpenLessImeX86/, "MSI should register x86 OpenLess IME during install");
 assert.match(wixFragment, /UnregisterOpenLessImeX64/, "MSI should unregister x64 OpenLess IME during uninstall");
 assert.match(wixFragment, /UnregisterOpenLessImeX86/, "MSI should unregister x86 OpenLess IME during uninstall");
+assert.match(
+  wixFragment,
+  /Custom Action="UnregisterOpenLessImeX86OnUninstall" Before="RemoveFiles"><!\[CDATA\[REMOVE="ALL"\]\]><\/Custom>/,
+  "MSI uninstall should unregister the x86 TSF DLL before RemoveFiles deletes it",
+);
+assert.match(
+  wixFragment,
+  /Custom Action="UnregisterOpenLessImeX64OnUninstall" Before="UnregisterOpenLessImeX86OnUninstall"><!\[CDATA\[REMOVE="ALL"\]\]><\/Custom>/,
+  "MSI uninstall should unregister the x64 TSF DLL before the x86 uninstall action",
+);
+assert.match(
+  wixFragment,
+  /Id="UnregisterOpenLessImeX64OnUninstall"[\s\S]*?\[System64Folder\]regsvr32\.exe&quot; \/s \/u &quot;\[#OpenLessImeDllX64\]&quot;/,
+  "MSI uninstall should use 64-bit regsvr32 to unregister the x64 TSF DLL",
+);
+assert.match(
+  wixFragment,
+  /Id="UnregisterOpenLessImeX86OnUninstall"[\s\S]*?\[WindowsFolder\]SysWOW64\\regsvr32\.exe&quot; \/s \/u &quot;\[#OpenLessImeDllX86\]&quot;/,
+  "MSI uninstall should use 32-bit regsvr32 to unregister the x86 TSF DLL",
+);
 
 assert.match(nsisHook, /NSIS_HOOK_PREINSTALL/, "NSIS should copy IME DLLs before install completes");
 assert.match(nsisHook, /NSIS_HOOK_POSTINSTALL/, "NSIS should register IME DLLs after files are installed");
@@ -159,6 +179,9 @@ assert.match(imeInstallSmoke, /\$ProfileGuid = "\{A3A75150-B165-4F0A-A2AB-B1E59D
 assert.match(imeInstallSmoke, /Software\\Classes\\CLSID\\\$TextServiceClsid\\InprocServer32/, "install smoke should check x64 COM registration");
 assert.match(imeInstallSmoke, /Software\\WOW6432Node\\Classes\\CLSID\\\$TextServiceClsid\\InprocServer32/, "install smoke should check x86 COM registration");
 assert.match(imeInstallSmoke, /LanguageProfile\\\$LangId\\\$ProfileGuid/, "install smoke should check the TSF language profile");
+assert.match(imeInstallSmoke, /function Assert-RegistryKeyAbsent/, "install smoke should support checking that registry keys were removed");
+assert.match(imeInstallSmoke, /function Assert-OpenLessImeUninstalled/, "install smoke should verify IME cleanup after uninstall");
+assert.match(imeInstallSmoke, /Uninstall-OpenLess -InstallRoot \$installRoot[\s\S]*Assert-OpenLessImeUninstalled/, "install smoke should assert COM and TSF cleanup after uninstall");
 assert.match(imeInstallSmoke, /\$KeyboardCategoryGuid = "\{34745C63-B2F0-4784-8B67-5E12C8701A31\}"/, "install smoke should define the keyboard TSF category");
 assert.match(imeInstallSmoke, /Category\\Category\\\$KeyboardCategoryGuid\\\$TextServiceClsid/, "install smoke should check the keyboard TSF category");
 assert.match(imeInstallSmoke, /foreach \(\$key in \$ExpectedBackendKeys\) \{[\s\S]*Assert-RegistryKey -View Registry64 -SubKey \$key[\s\S]*\}/, "install smoke should assert every backend-required registry key exists");

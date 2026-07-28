@@ -50,6 +50,8 @@ OpenLess Unbound 是基於 [OpenLess](https://github.com/Open-Less/openless) 的
 
 ## 近期同步內容
 
+`v1.3.14-2` 修正 Windows MSI 解除安裝後可能殘留 `OpenLess Unbound Voice Input` 的問題。安裝程式現在會在刪除 x64 與 x86 輸入法 DLL 之前，先解除 COM 與 TSF profile 註冊；portable 版本本身不會註冊輸入法，因此不受這項解除安裝問題影響。
+
 `v1.3.14-1` 選擇性整合上游 OpenLess 1.3.14 中適合 Windows 與 Unbound 主線的修正，並保留本 fork 的既有功能：
 
 - Windows Foundry Local Whisper 更新至相容的 1.2.1 runtime，長錄音會以 30 秒片段辨識並合併，等待時間也會依音訊長度調整。

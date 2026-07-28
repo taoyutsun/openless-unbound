@@ -48,15 +48,30 @@
       Impersonate="no"
       ExeCommand='&quot;[WindowsFolder]SysWOW64\regsvr32.exe&quot; /s /u &quot;[#OpenLessImeDllX86]&quot;'
       Return="ignore" />
+    <CustomAction
+      Id="UnregisterOpenLessImeX64OnUninstall"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[#OpenLessImeDllX64]&quot;'
+      Return="ignore" />
+    <CustomAction
+      Id="UnregisterOpenLessImeX86OnUninstall"
+      Directory="INSTALLDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='&quot;[WindowsFolder]SysWOW64\regsvr32.exe&quot; /s /u &quot;[#OpenLessImeDllX86]&quot;'
+      Return="ignore" />
 
     <InstallExecuteSequence>
-      <!-- Issue #321: unregister the old DLL before InstallFiles whenever a
-           previous version is installed, so Windows Installer can overwrite
-           OpenLessIme.dll instead of failing on a sharing violation. The
-           previous condition (REMOVE="ALL") only fired during dedicated
-           uninstall and skipped the auto-update / minor-upgrade path. -->
+      <!-- Upgrade and uninstall need separate actions because MSI schedules
+           each action id only once. Upgrades release the loaded DLLs before
+           replacement; uninstall unregisters both TSF profiles before
+           RemoveFiles deletes the DLLs needed by regsvr32. -->
       <Custom Action="UnregisterOpenLessImeX86" Before="InstallFiles"><![CDATA[Installed AND NOT REMOVE]]></Custom>
       <Custom Action="UnregisterOpenLessImeX64" Before="UnregisterOpenLessImeX86"><![CDATA[Installed AND NOT REMOVE]]></Custom>
+      <Custom Action="UnregisterOpenLessImeX86OnUninstall" Before="RemoveFiles"><![CDATA[REMOVE="ALL"]]></Custom>
+      <Custom Action="UnregisterOpenLessImeX64OnUninstall" Before="UnregisterOpenLessImeX86OnUninstall"><![CDATA[REMOVE="ALL"]]></Custom>
       <Custom Action="RegisterOpenLessImeX64" After="InstallFiles"><![CDATA[NOT REMOVE]]></Custom>
       <Custom Action="RegisterOpenLessImeX86" After="RegisterOpenLessImeX64"><![CDATA[NOT REMOVE]]></Custom>
     </InstallExecuteSequence>

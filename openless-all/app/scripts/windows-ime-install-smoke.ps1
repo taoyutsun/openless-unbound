@@ -103,6 +103,24 @@ function Assert-RegistryKey {
   Write-Host "[ok] $Label registry key present ($View)"
 }
 
+function Assert-RegistryKeyAbsent {
+  param(
+    [Parameter(Mandatory = $true)]
+    [Microsoft.Win32.RegistryView]$View,
+    [Parameter(Mandatory = $true)]
+    [string]$SubKey,
+    [Parameter(Mandatory = $true)]
+    [string]$Label
+  )
+
+  $key = Open-LocalMachineSubKey -View $View -SubKey $SubKey
+  if ($null -ne $key) {
+    $key.Close()
+    throw "$Label registry key remains after uninstall ($View): HKLM\$SubKey"
+  }
+  Write-Host "[ok] $Label registry key removed ($View)"
+}
+
 function Get-DefaultRegistryValue {
   param(
     [Parameter(Mandatory = $true)]
@@ -182,6 +200,13 @@ function Uninstall-OpenLess {
   }
 }
 
+function Assert-OpenLessImeUninstalled {
+  foreach ($key in $ExpectedBackendKeys) {
+    Assert-RegistryKeyAbsent -View Registry64 -SubKey $key -Label "backend-required"
+  }
+  Write-Host "[ok] Windows IME COM and TSF registrations removed"
+}
+
 if (-not (Test-IsAdministrator)) {
   throw "Windows IME install smoke must run from an elevated Administrator PowerShell."
 }
@@ -196,4 +221,5 @@ if ($InstallerKind -eq "nsis") {
 $installRoot = Assert-OpenLessImeInstalled
 if (-not $SkipUninstall) {
   Uninstall-OpenLess -InstallRoot $installRoot
+  Assert-OpenLessImeUninstalled
 }

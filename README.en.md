@@ -50,6 +50,8 @@ This fork keeps that foundation and focuses on practical constraints we ran into
 
 ## Recent Sync
 
+`v1.3.14-2` fixes an issue where uninstalling the Windows MSI could leave `OpenLess Unbound Voice Input` registered in Windows. The installer now unregisters the COM and TSF profiles before deleting the x64 and x86 IME DLLs. The portable build does not register the IME by itself and is not affected by this uninstall issue.
+
 `v1.3.14-1` selectively integrates upstream OpenLess 1.3.14 fixes that fit the Windows and Unbound mainline while retaining this fork's existing behavior:
 
 - Updates Windows Foundry Local Whisper to the compatible 1.2.1 runtime, transcribes long recordings in 30-second chunks, and scales timeouts with audio duration.
