@@ -47,3 +47,7 @@ mod recorder;
 mod shortcut_binding;
 #[path = "../../src/types.rs"]
 mod types;
+#[path = "../../src/windows_ime_profile.rs"]
+mod windows_ime_profile;
+#[path = "../../src/windows_ime_restore.rs"]
+mod windows_ime_restore;

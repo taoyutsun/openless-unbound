@@ -37,6 +37,7 @@ mod unicode_keystroke;
 mod windows_ime_ipc;
 mod windows_ime_profile;
 mod windows_ime_protocol;
+mod windows_ime_restore;
 mod windows_ime_session;
 
 use std::sync::atomic::{AtomicBool, Ordering};
