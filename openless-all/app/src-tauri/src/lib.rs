@@ -141,6 +141,24 @@ pub fn run() {
             // Capsule 启动时定位到屏幕底部居中并隐藏；coordinator 按需显示。
             // 与 Swift `CapsuleWindowController.repositionToBottomCenter` 同语义。
             if let Some(capsule) = app.get_webview_window("capsule") {
+                #[cfg(target_os = "windows")]
+                {
+                    if let Err(e) = capsule.set_decorations(false) {
+                        log::warn!("[capsule] startup disable decorations failed: {e}");
+                    }
+                    if let Err(e) = capsule.set_resizable(false) {
+                        log::warn!("[capsule] startup disable resizing failed: {e}");
+                    }
+                    if let Err(e) = capsule.set_skip_taskbar(true) {
+                        log::warn!("[capsule] startup hide from taskbar failed: {e}");
+                    }
+                    if let Err(e) = capsule.set_always_on_top(true) {
+                        log::warn!("[capsule] startup set always-on-top failed: {e}");
+                    }
+                    if let Err(e) = capsule.set_focusable(false) {
+                        log::warn!("[capsule] startup disable focus failed: {e}");
+                    }
+                }
                 if let Err(e) = position_capsule_bottom_center(&capsule, false) {
                     log::warn!("[capsule] position failed: {e}");
                 }

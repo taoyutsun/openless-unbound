@@ -34,6 +34,9 @@ assertEqual(capsuleWindow.width, 220, 'windows capsule config keeps translation-
 assertEqual(capsuleWindow.height, 110, 'windows capsule config keeps translation-capable height baseline');
 assertEqual(capsuleWindow.transparent, true, 'capsule window should keep transparent visuals');
 assertEqual(capsuleWindow.alwaysOnTop, true, 'capsule window should stay above the focused app while recording');
+assertEqual(capsuleWindow.decorations, false, 'capsule window should not expose native window chrome');
+assertEqual(capsuleWindow.resizable, false, 'capsule window should not expose resizing controls');
+assertEqual(capsuleWindow.skipTaskbar, true, 'capsule window should not appear in the taskbar');
 assertEqual(mainWindow.decorations, true, 'windows main window should keep native decorations');
 assertEqual(mainWindow.visible, false, 'windows main window should stay hidden until the intended first show point');
 
@@ -95,9 +98,12 @@ assertMatch(
 );
 assertMatch(
   coordinatorRs,
-  /fn hide_capsule_window_if_present\(\)/,
-  'windows capsule lifecycle should include an explicit native hide helper',
+  /fn hide_capsule_window_if_present<R: tauri::Runtime>\(window: &tauri::WebviewWindow<R>\)/,
+  'windows capsule lifecycle should hide the exact native window instead of finding it by title',
 );
+if (/FindWindowW|OpenLess Capsule/.test(coordinatorRs)) {
+  throw new Error('capsule lifecycle must not depend on a stale product-specific window title');
+}
 assertMatch(
   coordinatorRs,
   /ShowWindow\(hwnd, SW_HIDE\)/,
@@ -107,6 +113,11 @@ assertMatch(
   coordinatorRs,
   /SetWindowPos\([\s\S]*?HWND_NOTOPMOST[\s\S]*?SWP_HIDEWINDOW/m,
   'windows capsule hide helper should drop topmost participation when inactive',
+);
+assertMatch(
+  coordinatorRs,
+  /fn enforce_capsule_overlay_window[\s\S]*?set_decorations\(false\)[\s\S]*?set_resizable\(false\)[\s\S]*?set_skip_taskbar\(true\)[\s\S]*?set_focusable\(false\)/,
+  'windows capsule should reassert borderless non-activating overlay behavior before display',
 );
 
 if (!/export function getCapsuleHostMetrics\(\s*os: OS,\s*translationActive: boolean,\s*\): CapsuleHostMetrics/.test(capsuleLayoutTs)) {

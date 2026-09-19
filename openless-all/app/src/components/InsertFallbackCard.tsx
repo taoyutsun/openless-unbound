@@ -67,7 +67,10 @@ function CardButton({ label, primary, onClick }: { label: string; primary?: bool
   return (
     <button
       type="button"
-      onMouseDown={event => event.preventDefault()}
+      onMouseDown={event => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
       onClick={onClick}
       style={{ flex: primary ? 1 : undefined, height: 34, padding: '0 16px', borderRadius: 6, border: primary ? '1px solid var(--ol-blue, #2563eb)' : '1px solid var(--ol-capsule-btn-border, rgba(15, 23, 42, 0.18))', background: primary ? 'var(--ol-capsule-btn-bg-confirm, #2563eb)' : 'var(--ol-capsule-btn-bg, #ffffff)', color: primary ? '#ffffff' : 'var(--ol-capsule-btn-ink, #111827)', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }}
     >

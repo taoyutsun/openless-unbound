@@ -5329,23 +5329,45 @@ fn show_capsule_window_no_activate<R: tauri::Runtime>(
 }
 
 #[cfg(target_os = "windows")]
-fn hide_capsule_window_if_present() {
-    use std::iter::once;
-    use windows::core::PCWSTR;
+fn enforce_capsule_overlay_window<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    if let Err(error) = window.set_decorations(false) {
+        log::warn!("[capsule] disable decorations failed: {error}");
+    }
+    if let Err(error) = window.set_resizable(false) {
+        log::warn!("[capsule] disable resizing failed: {error}");
+    }
+    if let Err(error) = window.set_skip_taskbar(true) {
+        log::warn!("[capsule] hide from taskbar failed: {error}");
+    }
+    if let Err(error) = window.set_always_on_top(true) {
+        log::warn!("[capsule] set always-on-top failed: {error}");
+    }
+    if let Err(error) = window.set_focusable(false) {
+        log::warn!("[capsule] disable focus failed: {error}");
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn enforce_capsule_overlay_window<R: tauri::Runtime>(_window: &tauri::WebviewWindow<R>) {}
+
+#[cfg(target_os = "windows")]
+fn hide_capsule_window_if_present<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, SetWindowPos, ShowWindow, HWND_NOTOPMOST, SWP_HIDEWINDOW, SWP_NOACTIVATE,
-        SWP_NOMOVE, SWP_NOSIZE, SW_HIDE,
+        SetWindowPos, ShowWindow, HWND_NOTOPMOST, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SW_HIDE,
     };
 
-    let title: Vec<u16> = "OpenLess Capsule".encode_utf16().chain(once(0)).collect();
-    let hwnd = match unsafe { FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) } {
-        Ok(hwnd) => hwnd,
-        Err(_) => return,
-    };
-    if hwnd == HWND::default() || hwnd.0.is_null() {
+    let Ok(handle) = window.window_handle() else {
+        log::warn!("[capsule] hard hide failed: window handle unavailable");
         return;
-    }
+    };
+    let RawWindowHandle::Win32(raw) = handle.as_raw() else {
+        log::warn!("[capsule] hard hide failed: non-Win32 window handle");
+        return;
+    };
+    let hwnd = HWND(raw.hwnd.get() as *mut _);
 
     let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
     let _ = unsafe {
@@ -5362,7 +5384,7 @@ fn hide_capsule_window_if_present() {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn hide_capsule_window_if_present() {}
+fn hide_capsule_window_if_present<R: tauri::Runtime>(_window: &tauri::WebviewWindow<R>) {}
 
 const INSERT_FALLBACK_CARD_WIDTH: f64 = 420.0;
 const INSERT_FALLBACK_CARD_HEIGHT: f64 = 220.0;
@@ -5396,6 +5418,7 @@ fn show_insert_fallback_card(
         let Some(window) = app_for_main.get_webview_window("capsule") else {
             return;
         };
+        enforce_capsule_overlay_window(&window);
         if let Err(error) = window.set_ignore_cursor_events(false) {
             log::warn!("[fallback-card] enable pointer events failed: {error}");
         }
@@ -5467,7 +5490,24 @@ fn hide_insert_fallback_card(inner: &Arc<Inner>) {
             None::<crate::types::InsertFallbackCardPayload>,
         );
         if let Some(window) = app_for_main.get_webview_window("capsule") {
-            let _ = window.hide();
+            hide_capsule_window_if_present(&window);
+            if let Err(error) = window.hide() {
+                log::warn!("[fallback-card] hide failed: {error}");
+            }
+            if let Err(error) = window.set_ignore_cursor_events(true) {
+                log::warn!("[fallback-card] restore pointer passthrough failed: {error}");
+            }
+            CAPSULE_IGNORE_CURSOR_APPLIED.store(true, Ordering::SeqCst);
+            let bounds = crate::capsule_window_bounds(false);
+            if let Err(error) = window.set_size(tauri::LogicalSize::new(
+                bounds.width,
+                bounds.height,
+            )) {
+                log::warn!("[fallback-card] restore capsule size failed: {error}");
+            }
+            if let Err(error) = crate::position_capsule_bottom_center(&window, false) {
+                log::warn!("[fallback-card] restore capsule position failed: {error}");
+            }
         }
         *inner_for_main.capsule_layout.lock() = None;
     });
@@ -5662,7 +5702,7 @@ fn emit_capsule(
                     capsule_state_log_name(state)
                 );
             }
-            hide_capsule_window_if_present();
+            hide_capsule_window_if_present(&window);
             let _ = window.hide();
         }
     });
