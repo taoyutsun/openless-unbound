@@ -723,6 +723,71 @@ impl UserPreferences {
         self.style_system_prompts = current.style_system_prompts.clone();
         self.custom_style_prompts = current.custom_style_prompts.clone();
     }
+
+    pub(crate) fn salvage_from_json_bytes(bytes: &[u8]) -> Self {
+        let Ok(serde_json::Value::Object(map)) = serde_json::from_slice::<serde_json::Value>(bytes)
+        else {
+            return Self::default();
+        };
+
+        let mut cleaned = serde_json::Map::new();
+        for (key, value) in map {
+            if preference_field_is_valid(&key, &value) {
+                cleaned.insert(key, value);
+            } else {
+                log::warn!("[prefs] salvage dropping unparseable field: {key}");
+            }
+        }
+
+        match serde_json::from_value::<Self>(serde_json::Value::Object(cleaned.clone())) {
+            Ok(prefs) => prefs,
+            Err(err) => {
+                if let Some(prefs) = salvage_without_incomplete_legacy_hotkey(cleaned) {
+                    return prefs;
+                }
+                log::warn!(
+                    "[prefs] salvage still failed after field filtering: {err}; using defaults"
+                );
+                Self::default()
+            }
+        }
+    }
+}
+
+fn preference_field_is_valid(key: &str, value: &serde_json::Value) -> bool {
+    let probe =
+        serde_json::Value::Object(std::iter::once((key.to_string(), value.clone())).collect());
+    serde_json::from_value::<UserPreferencesWire>(probe).is_ok()
+}
+
+fn salvage_without_incomplete_legacy_hotkey(
+    mut map: serde_json::Map<String, serde_json::Value>,
+) -> Option<UserPreferences> {
+    let is_custom_legacy_hotkey = map
+        .get("hotkey")
+        .and_then(|value| value.get("trigger"))
+        .and_then(serde_json::Value::as_str)
+        == Some("custom");
+    if !is_custom_legacy_hotkey {
+        return None;
+    }
+
+    let has_dictation_hotkey = map
+        .get("dictationHotkey")
+        .and_then(|value| serde_json::from_value::<Option<ShortcutBinding>>(value.clone()).ok())
+        .flatten()
+        .is_some();
+    let has_custom_combo_hotkey = map
+        .get("customComboHotkey")
+        .and_then(|value| serde_json::from_value::<Option<ComboBinding>>(value.clone()).ok())
+        .flatten()
+        .is_some();
+    if has_dictation_hotkey || has_custom_combo_hotkey {
+        return None;
+    }
+
+    map.remove("hotkey");
+    serde_json::from_value::<UserPreferences>(serde_json::Value::Object(map)).ok()
 }
 
 fn default_local_asr_model() -> String {
@@ -2482,6 +2547,41 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn preference_salvage_preserves_valid_fields_when_one_value_is_invalid() {
+        let json = br#"{
+            "defaultMode": "removed-mode",
+            "dictationHotkey": { "primary": "ControlRight", "modifiers": [] },
+            "activeAsrProvider": "groq-whisper",
+            "qaLlmProvider": "codex-oauth",
+            "qaLlmModel": "gpt-5.6-sol"
+        }"#;
+
+        assert!(serde_json::from_slice::<UserPreferences>(json).is_err());
+
+        let salvaged = UserPreferences::salvage_from_json_bytes(json);
+        assert_eq!(salvaged.dictation_hotkey.primary, "ControlRight");
+        assert_eq!(salvaged.active_asr_provider, "groq-whisper");
+        assert_eq!(salvaged.qa_llm_provider.as_deref(), Some("codex-oauth"));
+        assert_eq!(salvaged.qa_llm_model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(
+            salvaged.default_mode,
+            UserPreferences::default().default_mode
+        );
+    }
+
+    #[test]
+    fn preference_salvage_drops_incomplete_legacy_custom_hotkey() {
+        let json = br#"{
+            "hotkey": { "trigger": "custom", "mode": "toggle" },
+            "activeAsrProvider": "preserved-provider"
+        }"#;
+
+        let salvaged = UserPreferences::salvage_from_json_bytes(json);
+        assert_eq!(salvaged.active_asr_provider, "preserved-provider");
+        assert_eq!(salvaged.hotkey, UserPreferences::default().hotkey);
     }
 
     #[test]

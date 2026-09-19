@@ -11,9 +11,9 @@
 //! A legacy plaintext JSON file is read once as a migration source and removed
 //! after a successful vault write; new writes never persist plaintext secrets.
 
-use std::fs;
-use std::io::{Read, Write};
 use std::collections::BTreeMap;
+use std::fs::{self, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -465,8 +465,37 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
     if bytes.is_empty() {
         return Ok(UserPreferences::default());
     }
-    let prefs = serde_json::from_slice::<UserPreferences>(&bytes)
-        .with_context(|| format!("decode failed: {}", path.display()))?;
+    let prefs = match serde_json::from_slice::<UserPreferences>(&bytes) {
+        Ok(prefs) => prefs,
+        Err(err) => {
+            log::error!(
+                "[prefs] strict decode of {} failed: {err:#}; backing up original and salvaging valid fields",
+                path.display()
+            );
+            let backup = backup_unparseable_preferences(path, &bytes)
+                .with_context(|| format!("backup failed: {}", path.display()))?;
+            log::info!(
+                "[prefs] original unparseable preferences backed up to {}",
+                backup.display()
+            );
+
+            let salvaged = UserPreferences::salvage_from_json_bytes(&bytes);
+            match serde_json::to_vec_pretty(&salvaged)
+                .context("encode salvaged prefs failed")
+                .and_then(|json| atomic_write(path, &json))
+            {
+                Ok(()) => log::info!(
+                    "[prefs] salvaged preferences written back to {}",
+                    path.display()
+                ),
+                Err(err) => log::warn!(
+                    "[prefs] failed to persist salvaged preferences to {}: {err}",
+                    path.display()
+                ),
+            }
+            return Ok(salvaged);
+        }
+    };
 
     // issue #440：老版本可能已把旧默认 `streamingInsert:false` 写进 preferences.json。
     // 反序列化会在内存里迁到 true，但还必须把迁移标记落盘，否则每次启动都停留在
@@ -494,6 +523,27 @@ fn read_preferences(path: &Path) -> Result<UserPreferences> {
     }
 
     Ok(prefs)
+}
+
+fn backup_unparseable_preferences(path: &Path, bytes: &[u8]) -> Result<PathBuf> {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let backup = path.with_file_name(format!(
+        "preferences.corrupt-{ts}-{}.json",
+        Uuid::new_v4().simple()
+    ));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&backup)
+        .with_context(|| format!("create backup failed: {}", backup.display()))?;
+    file.write_all(bytes)
+        .with_context(|| format!("write backup failed: {}", backup.display()))?;
+    file.sync_all()
+        .with_context(|| format!("flush backup failed: {}", backup.display()))?;
+    Ok(backup)
 }
 
 // ───────────────────────── credentials vault ─────────────────────────
@@ -2649,9 +2699,10 @@ impl CredentialsVault {
 #[cfg(test)]
 mod tests {
     use super::{
-        chunk_json_payload, chunk_skip_mask, list_vocab_presets, read_preferences,
-        parse_extra_headers_json, save_vocab_presets, sync_style_pack_preferences,
-        validate_correction_rule_syntax, PreferencesStore, KEYRING_CHUNK_MAX_UTF16_UNITS,
+        backup_unparseable_preferences, chunk_json_payload, chunk_skip_mask, list_vocab_presets,
+        parse_extra_headers_json, read_preferences, save_vocab_presets,
+        sync_style_pack_preferences, validate_correction_rule_syntax, PreferencesStore,
+        KEYRING_CHUNK_MAX_UTF16_UNITS,
     };
     use crate::types::{
         builtin_style_packs, CustomStylePrompts, PolishMode, UserPreferences, VocabPreset,
@@ -2769,6 +2820,55 @@ mod tests {
                 .and_then(|value| value.as_bool()),
             Some(true)
         );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn corrupt_preference_backups_are_unique_and_preserve_each_snapshot() {
+        let tmp: PathBuf =
+            std::env::temp_dir().join(format!("openless-prefs-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("preferences.json");
+
+        let first = backup_unparseable_preferences(&path, b"first").expect("first backup");
+        let second = backup_unparseable_preferences(&path, b"second").expect("second backup");
+
+        assert_ne!(first, second);
+        assert_eq!(fs::read(first).expect("read first backup"), b"first");
+        assert_eq!(fs::read(second).expect("read second backup"), b"second");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn read_preferences_salvages_valid_unbound_provider_fields() {
+        let tmp: PathBuf =
+            std::env::temp_dir().join(format!("openless-prefs-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("preferences.json");
+        fs::write(
+            &path,
+            r#"{
+                "defaultMode": "removed-mode",
+                "activeLlmProvider": "codex-oauth",
+                "qaLlmProvider": "codex-oauth",
+                "qaLlmModel": "gpt-5.6-terra"
+            }"#,
+        )
+        .expect("write corrupt prefs");
+
+        let prefs = read_preferences(&path).expect("salvage prefs");
+        assert_eq!(prefs.active_llm_provider, "codex-oauth");
+        assert_eq!(prefs.qa_llm_provider.as_deref(), Some("codex-oauth"));
+        assert_eq!(prefs.qa_llm_model.as_deref(), Some("gpt-5.6-terra"));
+        assert!(fs::read_dir(&tmp)
+            .expect("list temp dir")
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("preferences.corrupt-")));
 
         let _ = fs::remove_dir_all(&tmp);
     }
