@@ -8,7 +8,8 @@ import {
 } from '../lib/capsuleLayout';
 import { getSettings, invokeOrMock, isTauri } from '../lib/ipc';
 import { playRecordStartCue, stopAudioCue } from '../lib/audioCue';
-import type { CapsulePayload, CapsuleState, UserPreferences } from '../lib/types';
+import type { CapsulePayload, CapsuleState, InsertFallbackCardPayload, UserPreferences } from '../lib/types';
+import { InsertFallbackCard } from './InsertFallbackCard';
 
 interface AudioBarsProps {
   level: number;
@@ -299,6 +300,7 @@ export function Capsule() {
   const [insertedChars, setInsertedChars] = useState<number>(0);
   const [message, setMessage] = useState<string | undefined>();
   const [translation, setTranslation] = useState<boolean>(false);
+  const [insertFallback, setInsertFallback] = useState<InsertFallbackCardPayload | null>(null);
   // `leaving` 与 `lastVisibleState` 协同实现「退出动画」：
   // - 当 state 从非 idle 变成 idle 时，不立即卸载，而是把 leaving 置为 true 并保留
   //   最后一帧的可见 state（lastVisibleState），让胶囊用 capsule-out 动画收缩淡出。
@@ -327,8 +329,18 @@ export function Capsule() {
         if (p.insertedChars != null) setInsertedChars(p.insertedChars);
         setTranslation(p.translation === true);
       });
-      if (cancelled) handle();
-      else unlisten = handle;
+      const fallbackHandle = await listen<InsertFallbackCardPayload | null>('insert:fallback', event => {
+        setInsertFallback(event.payload ?? null);
+      });
+      if (cancelled) {
+        handle();
+        fallbackHandle();
+      } else {
+        unlisten = () => {
+          handle();
+          fallbackHandle();
+        };
+      }
     })();
     return () => {
       cancelled = true;
@@ -412,6 +424,10 @@ export function Capsule() {
   const onConfirm = () => {
     void invokeOrMock<void>('stop_dictation', undefined, () => undefined);
   };
+
+  if (insertFallback) {
+    return <InsertFallbackCard payload={insertFallback} />;
+  }
 
   // 真正卸载：state 已是 idle，且不在离场动画中。
   if (state === 'idle' && !leaving) {

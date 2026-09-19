@@ -243,6 +243,12 @@ export const en: typeof zhCN = {
     historyRetry: 'Retry',
     weekDays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
   },
+  insertFallbackCard: {
+    copy: 'Copy full text',
+    copied: 'Copied',
+    copyFailed: 'Copy failed',
+    dismiss: 'Dismiss',
+  },
   history: {
     kicker: 'HISTORY',
     title: 'History',

@@ -828,6 +828,14 @@ export function repolish(
     )
 }
 
+export function copyTextToClipboard(text: string): Promise<void> {
+    return invokeOrMock("copy_text_to_clipboard", { text }, () => undefined)
+}
+
+export function dismissInsertFallbackCard(): Promise<void> {
+    return invokeOrMock("dismiss_insert_fallback_card", undefined, () => undefined)
+}
+
 export function setDefaultPolishMode(mode: PolishMode): Promise<void> {
     return invokeOrMock("set_default_polish_mode", { mode }, () => {
         const packId = `builtin.${mode}`

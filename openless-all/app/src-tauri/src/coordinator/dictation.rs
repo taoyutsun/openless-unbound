@@ -188,6 +188,9 @@ async fn run_streaming_polish(
                     return (text, Some(reason), false);
                 }
             }
+            if typed_chars > 0 && typer_failure.is_some() {
+                *inner.insert_fallback_text.lock() = Some(text.clone());
+            }
             // 先确定 final_text —— typer 中途失败时屏幕只有 typed_text 这一段，
             // history 记完整 polish 反而会让用户复盘困惑。让 history / clipboard /
             // 后续逻辑统统用 final_text，三处保持一致。
@@ -551,6 +554,7 @@ pub(super) fn request_stop_during_starting(inner: &Arc<Inner>, reason: &str) {
 }
 
 pub(super) async fn begin_session(inner: &Arc<Inner>) -> Result<(), String> {
+    hide_insert_fallback_card(inner);
     let current_session_id = {
         let mut state = inner.state.lock();
         let Some(session_id) =
@@ -1819,7 +1823,11 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
             polished.chars().count(),
             polish_error
         );
-        InsertStatus::Inserted
+        if inner.insert_fallback_text.lock().is_some() {
+            InsertStatus::CopiedFallback
+        } else {
+            InsertStatus::Inserted
+        }
     } else if focus_ready_for_paste {
         #[cfg(target_os = "windows")]
         {
@@ -1951,8 +1959,25 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
             Some(now + std::time::Duration::from_millis(POST_SESSION_COOLDOWN_MS));
     }
     schedule_capsule_idle(inner, CAPSULE_AUTO_HIDE_DELAY_MS);
+    maybe_show_insert_fallback_card(inner, status, &polished);
 
     Ok(())
+}
+
+fn maybe_show_insert_fallback_card(
+    inner: &Arc<Inner>,
+    status: InsertStatus,
+    final_text: &str,
+) {
+    let streamed_full_text = inner.insert_fallback_text.lock().take();
+    if !matches!(status, InsertStatus::CopiedFallback | InsertStatus::Failed) {
+        return;
+    }
+    let (text, reason) = match streamed_full_text {
+        Some(full_text) => (full_text, "partialStream"),
+        None => (final_text.to_string(), "insertFailed"),
+    };
+    show_insert_fallback_card(inner, text, reason);
 }
 
 pub(super) fn dictation_error_code(

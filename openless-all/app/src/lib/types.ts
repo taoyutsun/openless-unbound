@@ -6,6 +6,12 @@ export type PolishMode = 'raw' | 'light' | 'structured' | 'formal';
 
 export type InsertStatus = 'inserted' | 'pasteSent' | 'copiedFallback' | 'failed';
 
+export interface InsertFallbackCardPayload {
+  text: string;
+  reason: 'partialStream' | 'insertFailed';
+  presentationId: number;
+}
+
 export interface DictationSession {
   id: string;
   createdAt: string; // ISO-8601

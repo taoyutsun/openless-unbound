@@ -241,6 +241,12 @@ export const zhCN = {
     historyRetry: '重试',
     weekDays: ['日', '一', '二', '三', '四', '五', '六'],
   },
+  insertFallbackCard: {
+    copy: '复制完整文字',
+    copied: '已复制',
+    copyFailed: '复制失败',
+    dismiss: '关闭',
+  },
   history: {
     kicker: 'HISTORY',
     title: '历史记录',

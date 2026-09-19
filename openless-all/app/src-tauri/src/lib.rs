@@ -376,6 +376,8 @@ pub fn run() {
             commands::start_dictation,
             commands::stop_dictation,
             commands::cancel_dictation,
+            commands::copy_text_to_clipboard,
+            commands::dismiss_insert_fallback_card,
             commands::handle_window_hotkey_event,
             #[cfg(debug_assertions)]
             commands::inject_hotkey_click_for_dev,

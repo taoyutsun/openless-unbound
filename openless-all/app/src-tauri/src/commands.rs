@@ -1750,6 +1750,16 @@ pub fn cancel_dictation(coord: CoordinatorState<'_>) {
 }
 
 #[tauri::command]
+pub fn copy_text_to_clipboard(coord: CoordinatorState<'_>, text: String) -> Result<(), String> {
+    coord.copy_text_to_clipboard(text)
+}
+
+#[tauri::command]
+pub fn dismiss_insert_fallback_card(coord: CoordinatorState<'_>) {
+    coord.dismiss_insert_fallback_card();
+}
+
+#[tauri::command]
 pub async fn handle_window_hotkey_event(
     coord: CoordinatorState<'_>,
     event_type: String,

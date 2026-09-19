@@ -245,6 +245,12 @@ export const ko: typeof zhCN = {
     historyRetry: '다시 시도',
     weekDays: ['일', '월', '화', '수', '목', '금', '토'],
   },
+  insertFallbackCard: {
+    copy: '전체 텍스트 복사',
+    copied: '복사됨',
+    copyFailed: '복사 실패',
+    dismiss: '닫기',
+  },
   history: {
     kicker: 'HISTORY',
     title: '기록',

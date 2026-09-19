@@ -243,6 +243,12 @@ export const zhTW: typeof zhCN = {
     historyRetry: '重試',
     weekDays: ['日', '一', '二', '三', '四', '五', '六'],
   },
+  insertFallbackCard: {
+    copy: '複製完整文字',
+    copied: '已複製',
+    copyFailed: '複製失敗',
+    dismiss: '關閉',
+  },
   history: {
     kicker: 'HISTORY',
     title: '歷史記錄',

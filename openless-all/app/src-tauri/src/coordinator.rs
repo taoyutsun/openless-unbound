@@ -5,7 +5,7 @@
 //! insertion, persists history, emits `capsule:state` events to the capsule
 //! window.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -299,6 +299,10 @@ struct Inner {
     /// 最近一次应用到 capsule 窗口的几何状态。避免录音 level tick 反复触发
     /// resize / reposition。
     capsule_layout: Mutex<Option<CapsuleLayoutState>>,
+    /// 流式上屏中途失敗時保留完整結果，讓收尾卡片能交還整段文字。
+    insert_fallback_text: Mutex<Option<String>>,
+    insert_fallback_card_visible: AtomicBool,
+    insert_fallback_presentation_id: AtomicU64,
     /// QA 用的 ASR 句柄，跟随当前 ASR provider。
     qa_asr: Mutex<Option<ActiveAsr>>,
     /// QA 用的 Recorder 句柄。
@@ -376,6 +380,9 @@ impl Coordinator {
                     qa_hotkey: Mutex::new(None),
                     qa_state: Mutex::new(QaSessionState::default()),
                     capsule_layout: Mutex::new(None),
+                    insert_fallback_text: Mutex::new(None),
+                    insert_fallback_card_visible: AtomicBool::new(false),
+                    insert_fallback_presentation_id: AtomicU64::new(0),
                     qa_asr: Mutex::new(None),
                     qa_recorder: Mutex::new(None),
                     qa_stream_cancelled: Arc::new(AtomicBool::new(false)),
@@ -438,6 +445,9 @@ impl Coordinator {
                 qa_hotkey: Mutex::new(None),
                 qa_state: Mutex::new(QaSessionState::default()),
                 capsule_layout: Mutex::new(None),
+                insert_fallback_text: Mutex::new(None),
+                insert_fallback_card_visible: AtomicBool::new(false),
+                insert_fallback_presentation_id: AtomicU64::new(0),
                 qa_asr: Mutex::new(None),
                 qa_recorder: Mutex::new(None),
                 qa_stream_cancelled: Arc::new(AtomicBool::new(false)),
@@ -968,6 +978,17 @@ impl Coordinator {
 
     pub fn cancel_dictation(&self) {
         cancel_session(&self.inner);
+    }
+
+    pub fn copy_text_to_clipboard(&self, text: String) -> Result<(), String> {
+        match self.inner.inserter.copy_fallback(&text) {
+            InsertStatus::CopiedFallback => Ok(()),
+            _ => Err("clipboard write failed".to_string()),
+        }
+    }
+
+    pub fn dismiss_insert_fallback_card(&self) {
+        hide_insert_fallback_card(&self.inner);
     }
 
     /// 返回当前听写阶段（read-only 快照），供 CLI 入口在 dispatch toggle 时决策。
@@ -5343,6 +5364,115 @@ fn hide_capsule_window_if_present() {
 #[cfg(not(target_os = "windows"))]
 fn hide_capsule_window_if_present() {}
 
+const INSERT_FALLBACK_CARD_WIDTH: f64 = 420.0;
+const INSERT_FALLBACK_CARD_HEIGHT: f64 = 220.0;
+
+fn show_insert_fallback_card(
+    inner: &Arc<Inner>,
+    text: String,
+    reason: &'static str,
+) {
+    if text.trim().is_empty() {
+        return;
+    }
+    let Some(app) = inner.app.lock().clone() else {
+        return;
+    };
+    let presentation_id = inner
+        .insert_fallback_presentation_id
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1);
+    inner
+        .insert_fallback_card_visible
+        .store(true, Ordering::SeqCst);
+    let payload = crate::types::InsertFallbackCardPayload {
+        text,
+        reason: reason.to_string(),
+        presentation_id,
+    };
+    let inner_for_main = Arc::clone(inner);
+    let app_for_main = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(window) = app_for_main.get_webview_window("capsule") else {
+            return;
+        };
+        if let Err(error) = window.set_ignore_cursor_events(false) {
+            log::warn!("[fallback-card] enable pointer events failed: {error}");
+        }
+        CAPSULE_IGNORE_CURSOR_APPLIED.store(false, Ordering::SeqCst);
+        if let Err(error) = window.set_size(tauri::LogicalSize::new(
+            INSERT_FALLBACK_CARD_WIDTH,
+            INSERT_FALLBACK_CARD_HEIGHT,
+        )) {
+            log::warn!("[fallback-card] resize failed: {error}");
+        }
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let scale = monitor.scale_factor();
+            let size = monitor.size();
+            let position = monitor.position();
+            let width = size.width as f64 / scale;
+            let height = size.height as f64 / scale;
+            let left = position.x as f64 / scale;
+            let top = position.y as f64 / scale;
+            let x = left + ((width - INSERT_FALLBACK_CARD_WIDTH) / 2.0).max(0.0);
+            let y = top + (height - INSERT_FALLBACK_CARD_HEIGHT - 80.0).max(0.0);
+            let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+        }
+        *inner_for_main.capsule_layout.lock() = None;
+        let _ = app_for_main.emit_to("capsule", "insert:fallback", payload.clone());
+        show_capsule_window_for_recording(&app_for_main, &window);
+        #[cfg(target_os = "macos")]
+        crate::restore_main_window_key_if_active(&app_for_main);
+        log::info!(
+            "[fallback-card] shown reason={} chars={} presentation_id={}",
+            payload.reason,
+            payload.text.chars().count(),
+            payload.presentation_id
+        );
+    });
+
+    let inner_for_timeout = Arc::clone(inner);
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(21)).await;
+        if inner_for_timeout
+            .insert_fallback_card_visible
+            .load(Ordering::SeqCst)
+            && inner_for_timeout
+                .insert_fallback_presentation_id
+                .load(Ordering::SeqCst)
+                == presentation_id
+        {
+            hide_insert_fallback_card(&inner_for_timeout);
+        }
+    });
+}
+
+fn hide_insert_fallback_card(inner: &Arc<Inner>) {
+    inner.insert_fallback_text.lock().take();
+    if !inner
+        .insert_fallback_card_visible
+        .swap(false, Ordering::SeqCst)
+    {
+        return;
+    }
+    let Some(app) = inner.app.lock().clone() else {
+        return;
+    };
+    let inner_for_main = Arc::clone(inner);
+    let app_for_main = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let _ = app_for_main.emit_to(
+            "capsule",
+            "insert:fallback",
+            None::<crate::types::InsertFallbackCardPayload>,
+        );
+        if let Some(window) = app_for_main.get_webview_window("capsule") {
+            let _ = window.hide();
+        }
+        *inner_for_main.capsule_layout.lock() = None;
+    });
+}
+
 fn emit_capsule(
     inner: &Arc<Inner>,
     state: CapsuleState,
@@ -5351,6 +5481,13 @@ fn emit_capsule(
     message: Option<String>,
     inserted_chars: Option<u32>,
 ) {
+    if state == CapsuleState::Recording
+        && inner
+            .insert_fallback_card_visible
+            .load(Ordering::SeqCst)
+    {
+        hide_insert_fallback_card(inner);
+    }
     let app_opt = inner.app.lock().clone();
     let Some(app) = app_opt else { return };
     let translation = inner.translation_modifier_seen.load(Ordering::SeqCst);
@@ -5471,6 +5608,13 @@ fn emit_capsule(
         let Some(window) = app_for_main.get_webview_window("capsule") else {
             return;
         };
+        if state == CapsuleState::Idle
+            && inner_for_main
+                .insert_fallback_card_visible
+                .load(Ordering::SeqCst)
+        {
+            return;
+        }
         let show_capsule = inner_for_main.prefs.get().show_capsule;
         // Linux: 不操作胶囊窗口（不 show/hide，不 reposition）。
         // 文字通过 fcitx5 插件直接 commit，用户始终在目标 app 中。

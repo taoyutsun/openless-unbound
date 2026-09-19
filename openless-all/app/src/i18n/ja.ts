@@ -245,6 +245,12 @@ export const ja: typeof zhCN = {
     historyRetry: '再試行',
     weekDays: ['日', '月', '火', '水', '木', '金', '土'],
   },
+  insertFallbackCard: {
+    copy: '全文をコピー',
+    copied: 'コピー済み',
+    copyFailed: 'コピー失敗',
+    dismiss: '閉じる',
+  },
   history: {
     kicker: 'HISTORY',
     title: '履歴',

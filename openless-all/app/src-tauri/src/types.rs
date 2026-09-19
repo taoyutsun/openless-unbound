@@ -108,6 +108,14 @@ pub struct DictationSession {
     pub has_audio_recording: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InsertFallbackCardPayload {
+    pub text: String,
+    pub reason: String,
+    pub presentation_id: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DictionaryEntry {
