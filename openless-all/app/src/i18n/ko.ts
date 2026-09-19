@@ -246,6 +246,7 @@ export const ko: typeof zhCN = {
     weekDays: ['일', '월', '화', '수', '목', '금', '토'],
   },
   insertFallbackCard: {
+    title: '텍스트를 자동으로 입력하지 못했습니다',
     copy: '전체 텍스트 복사',
     copied: '복사됨',
     copyFailed: '복사 실패',

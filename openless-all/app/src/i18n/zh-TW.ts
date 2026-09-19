@@ -244,6 +244,7 @@ export const zhTW: typeof zhCN = {
     weekDays: ['日', '一', '二', '三', '四', '五', '六'],
   },
   insertFallbackCard: {
+    title: '文字未能自動輸入',
     copy: '複製完整文字',
     copied: '已複製',
     copyFailed: '複製失敗',

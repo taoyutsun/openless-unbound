@@ -30,6 +30,15 @@
   --ol-glass-blur: 20px;
   --ol-glass-blur-strong: 36px;
 
+  /* Floating voice UI. Keep recovery content readable over arbitrary apps. */
+  --ol-capsule-pill-bg: rgba(255, 255, 255, 0.98);
+  --ol-capsule-pill-border: rgba(15, 23, 42, 0.18);
+  --ol-capsule-pill-shadow: 0 18px 48px -14px rgba(15, 23, 42, 0.34), 0 4px 14px rgba(15, 23, 42, 0.14);
+  --ol-capsule-btn-bg: #ffffff;
+  --ol-capsule-btn-bg-confirm: var(--ol-blue);
+  --ol-capsule-btn-ink: #111827;
+  --ol-capsule-btn-border: rgba(15, 23, 42, 0.18);
+
   /* 假毛玻璃噪点 —— qa 追问框 / capsule 语音胶囊等透明浮窗用。详见 global.css .ol-frost。
      关键点：feColorMatrix 用 matrix 把分形噪点**去色 + 强制 alpha=1**（不透明灰度噪点）。
      早期版本用 saturate=0 保留了 feTurbulence 的随机 alpha，噪点本身就半透明，再叠

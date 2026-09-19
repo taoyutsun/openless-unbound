@@ -244,6 +244,7 @@ export const en: typeof zhCN = {
     weekDays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
   },
   insertFallbackCard: {
+    title: 'Text could not be inserted',
     copy: 'Copy full text',
     copied: 'Copied',
     copyFailed: 'Copy failed',

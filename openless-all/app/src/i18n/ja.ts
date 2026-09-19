@@ -246,6 +246,7 @@ export const ja: typeof zhCN = {
     weekDays: ['日', '月', '火', '水', '木', '金', '土'],
   },
   insertFallbackCard: {
+    title: 'テキストを自動入力できませんでした',
     copy: '全文をコピー',
     copied: 'コピー済み',
     copyFailed: 'コピー失敗',
