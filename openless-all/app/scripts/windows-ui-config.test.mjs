@@ -34,13 +34,18 @@ assertEqual(capsuleWindow.width, 220, 'windows capsule config keeps translation-
 assertEqual(capsuleWindow.height, 110, 'windows capsule config keeps translation-capable height baseline');
 assertEqual(capsuleWindow.transparent, true, 'capsule window should keep transparent visuals');
 assertEqual(capsuleWindow.alwaysOnTop, true, 'capsule window should stay above the focused app while recording');
-assertEqual(mainWindow.decorations, true, 'shared main window config should keep native macOS traffic lights');
+assertEqual(mainWindow.decorations, true, 'windows main window should keep native decorations');
 assertEqual(mainWindow.visible, false, 'windows main window should stay hidden until the intended first show point');
 
 assertMatch(
   libRs,
-  /#\[cfg\(target_os = "windows"\)\][\s\S]*?main\.set_decorations\(false\)/,
-  'windows runtime should disable native chrome before the first show',
+  /#\[cfg\(target_os = "windows"\)\][\s\S]*?apply_mica\(&main, None\)[\s\S]*?apply_windows_caption_color\(&main\)/,
+  'windows runtime should keep native chrome and apply its visual treatment',
+);
+assertMatch(
+  libRs,
+  /fn apply_windows_caption_color[\s\S]*?DWMWA_CAPTION_COLOR/,
+  'windows native caption should use the configured titlebar color',
 );
 
 assertMatch(
@@ -49,8 +54,8 @@ assertMatch(
   'macOS capsule should show without taking the key window',
 );
 
-if (!/function WindowsResizeHandles\(\)/.test(windowChromeTsx)) {
-  throw new Error('windows frameless shell should expose explicit resize handles');
+if (!/const shellRadius = os === 'mac' \? 0 : os === 'win' \? 0 : 14;/.test(windowChromeTsx)) {
+  throw new Error('windows shell should defer window radius to native decorations');
 }
 
 assertMatch(
@@ -66,8 +71,8 @@ assertMatch(
 if (/standardWindowButton|setFrameOrigin: origin|tune_macos_main_window_controls/.test(libRs)) {
   throw new Error('macOS traffic lights should not be manually repositioned; keep native AppKit button frames visible');
 }
-if (!/action=\"close\"/.test(windowChromeTsx) || !/tone=\"danger\"/.test(windowChromeTsx)) {
-  throw new Error('windows titlebar should keep the close button and danger hover treatment');
+if (!/className=\"ol-linux-close-btn\"/.test(windowChromeTsx)) {
+  throw new Error('linux titlebar should keep its close button treatment');
 }
 assertMatch(
   tokensCss,
@@ -75,8 +80,8 @@ assertMatch(
   'shared motion tokens should drive shell animations and transitions',
 );
 
-if (!/startResizeDragging\(direction\)/.test(windowChromeTsx)) {
-  throw new Error('windows resize handles should delegate edge dragging to Tauri');
+if (!/function LinuxTitlebar\(\)/.test(windowChromeTsx)) {
+  throw new Error('linux should keep the custom titlebar while Windows uses native decorations');
 }
 
 if (!/borderRadius:\s*'var\(--ol-window-console-radius\)'/.test(floatingShellTsx)) {
