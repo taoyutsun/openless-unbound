@@ -35,7 +35,7 @@ This fork keeps that foundation and focuses on practical constraints we ran into
 - **Selection Q&A**: select text in any app and ask follow-up questions in a floating panel.
 - **Vocabulary**: add names, product terms, English tool names, and domain words to improve recognition.
 - **Correction rules**: rewrite common ASR mistakes into preferred text.
-- **History**: review and reuse previous dictation results.
+- **History**: search, copy, and reuse previous dictation results, then repolish them with a different output style.
 - **Local-first storage**: settings and history stay on the device; cloud ASR / LLM calls happen only when enabled by the user.
 
 ## Differences From Upstream
@@ -49,6 +49,18 @@ This fork keeps that foundation and focuses on practical constraints we ran into
 | Update path | Official upstream | Independent fork, with upstream attribution preserved |
 
 ## Recent Sync
+
+`v1.3.18-1` selectively integrates upstream OpenLess 1.3.18 stability and workflow improvements that fit the Windows and Unbound mainline:
+
+- History entries can be repolished with a selected built-in or custom style without recording the audio again.
+- When text cannot be inserted into the target app, a recovery card exposes the full selectable text with one-click copy. On Windows it stays borderless, does not take focus, and closes without leaving a transparent window behind.
+- Whisper-compatible WebSocket connections now have a handshake timeout. LLM polishing timeouts scale with text length and streaming progress, reducing indefinite stalls and premature failures on longer text.
+- If individual preference fields become invalid, the app salvages the remaining Unbound provider, hotkey, and feature settings instead of resetting the entire configuration.
+- Windows now restores the previous input method more reliably after TSF insertion, and security-sensitive build and input dependencies have been updated.
+
+When **Allow non-TSF fallback** is enabled, OpenLess tries simulated keyboard input or clipboard paste after TSF insertion fails. If Windows accepts that operation, the recovery card is not shown. Disable this option when testing TSF itself or when you want an explicit TSF failure to open the recovery card for manual copying.
+
+Android APK runtime, mobile remote input, Less Computer / Cloud Agent, and large mobile UI changes remain excluded to keep the Windows mainline focused and stable.
 
 `v1.3.14-2` fixes an issue where uninstalling the Windows MSI could leave `OpenLess Unbound Voice Input` registered in Windows. The installer now unregisters the COM and TSF profiles before deleting the x64 and x86 IME DLLs. The portable build does not register the IME by itself and is not affected by this uninstall issue.
 
@@ -106,7 +118,7 @@ Windows may show SmartScreen or "unknown publisher" warnings until code signing 
 1. Place the cursor in the target app or text field.
 2. Press Right Ctrl to start recording, then press it again to stop.
 3. OpenLess Unbound transcribes with ASR, then polishes the text according to the current style.
-4. The result is inserted at the cursor. If the target app rejects direct insertion, the text is still available through the clipboard or fallback insertion path.
+4. The result is inserted at the cursor. If the insertion pipeline reports a failure, a recovery card lets you select or copy the complete text.
 
 Add recurring names and product terms to Vocabulary. Put stable recognition mistakes in Correction Rules.
 
@@ -133,6 +145,8 @@ Selection Q&A does not provide a built-in browser, live search, or external tool
 ## Windows IME Notes
 
 OpenLess Unbound includes a Windows TSF input backend for inserting dictated text into the current app. This fork registers that profile as Traditional Chinese Taiwan, reducing the chance that Traditional Chinese users get switched to Simplified Chinese after dictation.
+
+**Allow non-TSF fallback** improves insertion compatibility with special apps by trying simulated keyboard input or clipboard paste after TSF is rejected. Temporarily disable it when diagnosing TSF or when you want an explicit TSF failure to open the recovery card.
 
 ## Run From Source
 
