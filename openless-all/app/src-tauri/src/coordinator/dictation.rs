@@ -1146,6 +1146,7 @@ fn build_transcribe_failed_session(
     session_id: SessionId,
     duration_ms: u64,
     mode: PolishMode,
+    style_pack_id: Option<String>,
     has_audio_recording: bool,
 ) -> DictationSession {
     DictationSession {
@@ -1154,6 +1155,7 @@ fn build_transcribe_failed_session(
         raw_transcript: String::new(),
         final_text: String::new(),
         mode,
+        style_pack_id,
         app_bundle_id: None,
         app_name: None,
         insert_status: InsertStatus::Failed,
@@ -1170,6 +1172,7 @@ fn append_transcribe_failed_history(inner: &Arc<Inner>, session_id: SessionId, d
         session_id,
         duration_ms,
         prefs.default_mode,
+        Some(prefs.active_style_pack_id.clone()),
         inner.audio_archive_active.load(Ordering::Relaxed),
     );
     if let Err(e) = inner.history.append_with_retention(
@@ -1561,14 +1564,16 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
     }
 
     if raw.text.trim().is_empty() {
+        let prefs_snapshot = inner.prefs.get();
         let session = DictationSession {
             id: current_session_id.to_string(),
             created_at: Utc::now().to_rfc3339(),
             raw_transcript: raw.text.clone(),
             final_text: String::new(),
-            mode: inner.prefs.get().default_mode,
+            mode: prefs_snapshot.default_mode,
+            style_pack_id: Some(prefs_snapshot.active_style_pack_id.clone()),
             app_bundle_id: None,
-            app_name: None,
+            app_name: inner.state.lock().front_app.clone(),
             insert_status: InsertStatus::Failed,
             error_code: Some("emptyTranscript".to_string()),
             duration_ms: Some(raw.duration_ms),
@@ -1578,7 +1583,6 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
             // "Missing Audio" 反馈。
             has_audio_recording: Some(inner.audio_archive_active.load(Ordering::Relaxed)),
         };
-        let prefs_snapshot = inner.prefs.get();
         if let Err(e) = inner.history.append_with_retention(
             session,
             prefs_snapshot.history_retention_days,
@@ -1899,8 +1903,9 @@ pub(super) async fn end_session(inner: &Arc<Inner>) -> Result<(), String> {
         raw_transcript: raw.text.clone(),
         final_text: polished.clone(),
         mode,
+        style_pack_id: Some(pack.id.clone()),
         app_bundle_id: None,
-        app_name: None,
+        app_name: front_app.clone(),
         insert_status: status,
         error_code,
         duration_ms: Some(raw.duration_ms),
@@ -2179,7 +2184,13 @@ mod tests {
     #[test]
     fn transcribe_failed_history_uses_session_id_and_audio_flag() {
         let sid = uuid::Uuid::new_v4();
-        let session = build_transcribe_failed_session(sid, 1234, PolishMode::Structured, true);
+        let session = build_transcribe_failed_session(
+            sid,
+            1234,
+            PolishMode::Structured,
+            Some("builtin.structured".to_string()),
+            true,
+        );
 
         assert_eq!(session.id, sid.to_string());
         assert!(matches!(session.insert_status, InsertStatus::Failed));

@@ -1773,13 +1773,15 @@ pub async fn repolish(
     coord: CoordinatorState<'_>,
     raw_text: String,
     mode: PolishMode,
+    style_pack_id: Option<String>,
 ) -> Result<String, String> {
     log::info!(
-        "[style-pack] command repolish requested legacy_mode={:?} raw_chars={}",
+        "[style-pack] command repolish requested legacy_mode={:?} raw_chars={} style_pack_id={:?}",
         mode,
-        raw_text.chars().count()
+        raw_text.chars().count(),
+        style_pack_id
     );
-    coord.repolish(raw_text, mode).await
+    coord.repolish(raw_text, mode, style_pack_id).await
 }
 
 // ─────────────────────────── style packs ───────────────────────────

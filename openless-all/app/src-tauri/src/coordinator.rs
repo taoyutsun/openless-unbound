@@ -1013,14 +1013,22 @@ impl Coordinator {
         Ok(())
     }
 
-    pub async fn repolish(&self, raw_text: String, mode: PolishMode) -> Result<String, String> {
+    pub async fn repolish(
+        &self,
+        raw_text: String,
+        mode: PolishMode,
+        style_pack_id: Option<String>,
+    ) -> Result<String, String> {
         let hotwords = enabled_phrases(&self.inner);
         let prefs = self.inner.prefs.get();
-        let pack = self
-            .inner
-            .style_packs
-            .get_or_default_active(&prefs.active_style_pack_id)
-            .map_err(|e| e.to_string())?;
+        let pack = match style_pack_id.as_deref() {
+            Some(id) => self.inner.style_packs.get(id).map_err(|e| e.to_string())?,
+            None => self
+                .inner
+                .style_packs
+                .get_or_default_active(&prefs.active_style_pack_id)
+                .map_err(|e| e.to_string())?,
+        };
         let style_system_prompt = pack.prompt.clone();
         let working_languages = prefs.working_languages;
         let chinese_script_preference = prefs.chinese_script_preference;
@@ -1028,7 +1036,7 @@ impl Coordinator {
         let llm_thinking_enabled = prefs.llm_thinking_enabled;
         let effective_mode = pack.base_mode;
         log::info!(
-            "[style-pack] repolish dispatch active_pack={} kind={:?} effective_mode={:?} legacy_mode={:?} raw_chars={} prompt_chars={} hotwords={} thinking={}",
+            "[style-pack] repolish dispatch pack={} kind={:?} effective_mode={:?} legacy_mode={:?} raw_chars={} prompt_chars={} hotwords={} thinking={}",
             pack.id,
             pack.kind,
             effective_mode,
@@ -3787,6 +3795,7 @@ async fn end_qa_session(inner: &Arc<Inner>) -> Result<(), String> {
             raw_transcript: question.clone(),
             final_text: answer.clone(),
             mode: PolishMode::Raw,
+            style_pack_id: None,
             app_bundle_id: None,
             app_name: front_app.clone(),
             insert_status: InsertStatus::CopiedFallback,

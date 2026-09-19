@@ -6,8 +6,9 @@ import { useTranslation } from 'react-i18next';
 import { Icon } from '../components/Icon';
 import { detectOS } from '../components/WindowChrome';
 import { formatComboLabel } from '../lib/hotkey';
-import { clearHistory, deleteHistoryEntry, listHistory, readAudioRecording, retranscribeRecording } from '../lib/ipc';
-import type { DictationSession, PolishMode } from '../lib/types';
+import { clearHistory, deleteHistoryEntry, listHistory, listStylePacks, readAudioRecording, repolish, retranscribeRecording } from '../lib/ipc';
+import { defaultPackId, packDisplayName, retryPackId } from '../lib/historyRepolish';
+import type { DictationSession, PolishMode, StylePack } from '../lib/types';
 import { useHotkeySettings } from '../state/HotkeySettingsContext';
 import { Btn, Card, PageHeader, Pill } from './_atoms';
 
@@ -30,6 +31,17 @@ function useModeLabel(): Record<PolishMode, string> {
     structured: t('style.modes.structured.name'),
     formal: t('style.modes.formal.name'),
   };
+}
+
+function styleLabelFor(
+  session: DictationSession,
+  allPacks: StylePack[] | null,
+  modeLabel: Record<PolishMode, string>,
+): string {
+  const pack = session.stylePackId
+    ? allPacks?.find(candidate => candidate.id === session.stylePackId)
+    : undefined;
+  return pack ? packDisplayName(pack, modeLabel) : modeLabel[session.mode];
 }
 
 export function History() {
@@ -65,6 +77,8 @@ export function History() {
     });
   }, []);
   const { prefs } = useHotkeySettings();
+  const [allPacks, setAllPacks] = useState<StylePack[] | null>(null);
+  const [packsError, setPacksError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -85,6 +99,20 @@ export function History() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listStylePacks()
+      .then(packs => {
+        if (!cancelled) setAllPacks(packs);
+      })
+      .catch(error => {
+        if (!cancelled) setPacksError(errorMessage(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ⌘K / Ctrl+K 聚焦搜索框（issue #612 验收可选项）。
   useEffect(() => {
@@ -330,7 +358,9 @@ export function History() {
                 <div style={{ fontSize: 12, color: 'var(--ol-ink-2)', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                   {s.finalText.split('\n')[0]}
                 </div>
-                <div><Pill size="sm" tone={s.mode === 'raw' ? 'outline' : 'default'}>{MODE_LABEL[s.mode]}</Pill></div>
+                <div title={styleLabelFor(s, allPacks, MODE_LABEL)}>
+                  <Pill size="sm" tone={s.mode === 'raw' ? 'outline' : 'default'}>{styleLabelFor(s, allPacks, MODE_LABEL)}</Pill>
+                </div>
               </button>
             ))}
           </div>
@@ -342,7 +372,7 @@ export function History() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: 13, fontFamily: 'var(--ol-font-mono)', color: 'var(--ol-ink-3)' }}>{formatTime(item.createdAt)}</span>
-                  <Pill size="sm" tone="default">{MODE_LABEL[item.mode]}</Pill>
+                  <Pill size="sm" tone="default">{styleLabelFor(item, allPacks, MODE_LABEL)}</Pill>
                   <span style={{ fontSize: 11, color: 'var(--ol-ink-4)' }}>{formatDuration(item.durationMs, t)}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
@@ -366,7 +396,7 @@ export function History() {
                 <AudioRecordingPlayer
                   sessionId={item.id}
                   onMissing={() => markAudioMissing(item.id)}
-                  key={item.id}
+                  key={`audio-${item.id}`}
                 />
               )}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -384,7 +414,7 @@ export function History() {
                   </p>
                 </div>
                 <div style={{ padding: 14, border: '0.5px solid var(--ol-blue)', borderRadius: 10, background: 'var(--ol-blue-soft)' }}>
-                  <Pill size="sm" tone="blue" style={{ marginBottom: 10 }}>{MODE_LABEL[item.mode]}</Pill>
+                  <Pill size="sm" tone="blue" style={{ marginBottom: 10 }}>{styleLabelFor(item, allPacks, MODE_LABEL)}</Pill>
                   <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink)', whiteSpace: 'pre-line' }}>
                     {item.finalText}
                   </p>
@@ -406,6 +436,14 @@ export function History() {
                       : t('history.insertFailed')
                 }</span>
               </div>
+              {item.rawTranscript.trim() && item.errorCode !== 'qaSession' && (
+                <RepolishPanel
+                  session={item}
+                  allPacks={allPacks}
+                  packsError={packsError}
+                  key={`repolish-${item.id}`}
+                />
+              )}
             </>
           ) : (
             <div style={{ padding: 40, textAlign: 'center', fontSize: 13, color: 'var(--ol-ink-4)' }}>
@@ -414,6 +452,137 @@ export function History() {
           )}
         </Card>
       </div>
+    </div>
+  );
+}
+
+interface RepolishResult {
+  key: string;
+  title: string;
+  text: string;
+}
+
+function RepolishPanel({ session, allPacks, packsError }: {
+  session: DictationSession;
+  allPacks: StylePack[] | null;
+  packsError: string | null;
+}) {
+  const { t } = useTranslation();
+  const modeLabel = useModeLabel();
+  const packs = useMemo(
+    () => (allPacks ? allPacks.filter(pack => pack.enabled) : null),
+    [allPacks],
+  );
+  const [selectedPackId, setSelectedPackId] = useState('');
+  const [running, setRunning] = useState<'retry' | 'apply' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<RepolishResult[]>([]);
+
+  useEffect(() => {
+    if (packs) setSelectedPackId(current => current || defaultPackId(packs));
+  }, [packs]);
+
+  const run = async (kind: 'retry' | 'apply') => {
+    const packId = kind === 'retry'
+      ? retryPackId(session, allPacks, packs ?? [])
+      : selectedPackId || undefined;
+    if (!packId) return;
+    setRunning(kind);
+    setError(null);
+    try {
+      const text = await repolish(session.rawTranscript, session.mode, packId);
+      const pack = allPacks?.find(candidate => candidate.id === packId);
+      const title = pack
+        ? t('history.repolish.resultTitle', { name: packDisplayName(pack, modeLabel) })
+        : t('history.repolish.retryResultTitle');
+      const result = { key: packId, title, text };
+      setResults(previous => [result, ...previous.filter(item => item.key !== result.key)]);
+    } catch (caught) {
+      const message = errorMessage(caught);
+      const timeout = /^(timeout|timed out|request timed out)$/i.test(message.trim())
+        || message.includes('超時')
+        || message.includes('超时');
+      setError(timeout
+        ? t('history.repolish.timeout')
+        : t('history.repolish.failed', { err: message }));
+    } finally {
+      setRunning(null);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 18, paddingTop: 14, borderTop: '0.5px solid var(--ol-line-soft)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <b style={{ fontSize: 12, color: 'var(--ol-ink-2)' }}>{t('history.repolish.title')}</b>
+        {results.length > 0 && (
+          <Btn size="sm" variant="ghost" onClick={() => setResults([])}>{t('history.repolish.clear')}</Btn>
+        )}
+      </div>
+      <p style={{ margin: '5px 0 12px', fontSize: 11, lineHeight: 1.55, color: 'var(--ol-ink-4)' }}>
+        {t('history.repolish.hint')}
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <Btn icon="refresh" variant="ghost" size="sm" disabled={running !== null || !packs?.length} onClick={() => void run('retry')}>
+          {running === 'retry' ? t('history.repolish.retrying') : t('history.repolish.retry')}
+        </Btn>
+        {packsError ? (
+          <span style={{ fontSize: 11, color: 'var(--ol-red, #ef4444)' }}>{t('history.repolish.packsLoadFailed', { err: packsError })}</span>
+        ) : (
+          <>
+            <select
+              value={selectedPackId}
+              onChange={event => setSelectedPackId(event.target.value)}
+              aria-label={t('history.repolish.pickStyle')}
+              disabled={!packs?.length || running !== null}
+              style={{ padding: '5px 8px', fontSize: 11.5, fontFamily: 'inherit', color: 'var(--ol-ink-2)', background: 'var(--ol-surface-2)', border: '0.5px solid var(--ol-line-strong)', borderRadius: 8, maxWidth: 240 }}
+            >
+              {(packs ?? []).map(pack => (
+                <option key={pack.id} value={pack.id}>{packDisplayName(pack, modeLabel)}</option>
+              ))}
+            </select>
+            <Btn variant="ghost" size="sm" disabled={!selectedPackId || running !== null} onClick={() => void run('apply')}>
+              {running === 'apply' ? t('history.repolish.applying') : t('history.repolish.apply')}
+            </Btn>
+          </>
+        )}
+      </div>
+      {error && (
+        <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(239,68,68,0.08)', color: 'var(--ol-red, #ef4444)', fontSize: 11.5 }}>
+          {error}
+        </div>
+      )}
+      {results.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginTop: 14 }}>
+          {results.map(result => <RepolishResultCard key={result.key} result={result} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RepolishResultCard({ result }: { result: RepolishResult }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(result.text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch (error) {
+      console.error('[history] failed to copy repolish result', error);
+    }
+  };
+  return (
+    <div style={{ minWidth: 0, padding: 14, border: '0.5px dashed var(--ol-line-strong)', borderRadius: 8, background: 'var(--ol-surface-2)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+        <Pill size="sm" tone="default">{result.title}</Pill>
+        <Btn icon={copied ? 'check' : 'copy'} variant="ghost" size="sm" onClick={() => void copy()}>
+          {copied ? t('common.copied') : t('common.copy')}
+        </Btn>
+      </div>
+      <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: 'var(--ol-ink-2)', whiteSpace: 'pre-wrap' }}>
+        {result.text || t('history.repolish.empty')}
+      </p>
     </div>
   );
 }

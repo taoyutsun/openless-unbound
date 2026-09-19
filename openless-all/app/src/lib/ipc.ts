@@ -816,8 +816,16 @@ export function handleWindowHotkeyEvent(
 }
 
 // ── Polish ─────────────────────────────────────────────────────────────
-export function repolish(rawText: string, mode: PolishMode): Promise<string> {
-    return invokeOrMock("repolish", { rawText, mode }, () => rawText)
+export function repolish(
+    rawText: string,
+    mode: PolishMode,
+    stylePackId?: string,
+): Promise<string> {
+    return invokeOrMock(
+        "repolish",
+        { rawText, mode, stylePackId },
+        () => `${rawText} (${stylePackId ?? "active style"})`,
+    )
 }
 
 export function setDefaultPolishMode(mode: PolishMode): Promise<void> {

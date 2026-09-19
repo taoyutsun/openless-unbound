@@ -92,6 +92,9 @@ pub struct DictationSession {
     pub raw_transcript: String,
     pub final_text: String,
     pub mode: PolishMode,
+    /// 產生這筆結果時實際使用的風格包。舊歷史沒有此欄位時保持相容。
+    #[serde(default)]
+    pub style_pack_id: Option<String>,
     pub app_bundle_id: Option<String>,
     pub app_name: Option<String>,
     pub insert_status: InsertStatus,
